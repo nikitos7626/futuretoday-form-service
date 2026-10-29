@@ -62,10 +62,111 @@ function calculateProgress(questions, answers) {
 class SurveyService {
   constructor(db) {
     this._db = db;
+    this._stmts = null;
+    this._stmtsDb = null;
+    if (this._db) {
+      this._initStatements(this._db);
+    }
   }
 
   get db() {
     return this._db || getDatabase();
+  }
+
+  get stmts() {
+    const currentDb = this.db;
+    if (!this._stmts || this._stmtsDb !== currentDb) {
+      this._initStatements(currentDb);
+    }
+    return this._stmts;
+  }
+
+  _initStatements(db) {
+    this._stmtsDb = db;
+    this._stmts = {
+      findSurveySlug: db.prepare('SELECT id FROM surveys WHERE slug = ?'),
+      findSurveyByHash: db.prepare('SELECT slug, title FROM surveys WHERE content_hash = ?'),
+      findSurveyByHashExcludingId: db.prepare('SELECT slug, title FROM surveys WHERE content_hash = ? AND id != ?'),
+      findSurveyByIdAndSlug: db.prepare('SELECT id FROM surveys WHERE slug = ? AND id != ?'),
+      insertSurvey: db.prepare(`
+        INSERT INTO surveys (slug, title, description, questions, created_at, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `),
+      getSurveyBySlug: db.prepare('SELECT * FROM surveys WHERE slug = ?'),
+      updateSurvey: db.prepare(`
+        UPDATE surveys
+        SET title = ?, description = ?, questions = ?, content_hash = ?, slug = ?
+        WHERE id = ?
+      `),
+      listSurveys: db.prepare(`
+        SELECT 
+          s.id,
+          s.slug,
+          s.title,
+          s.description,
+          s.created_at,
+          s.content_hash,
+          COUNT(r.id) as total_responses,
+          SUM(CASE WHEN r.status = 'submitted' THEN 1 ELSE 0 END) as submitted_count,
+          SUM(CASE WHEN r.status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_count,
+          MAX(r.updated_at) as last_activity
+        FROM surveys s
+        LEFT JOIN responses r ON r.survey_id = s.id
+        GROUP BY s.id
+        ORDER BY s.id DESC
+      `),
+      deleteSurvey: db.prepare('DELETE FROM surveys WHERE id = ?'),
+      findResponseByUuid: db.prepare('SELECT * FROM responses WHERE session_uuid = ?'),
+      insertResponse: db.prepare(`
+        INSERT INTO responses (
+          survey_id, session_uuid, current_step, progress, status,
+          answers, started_at, updated_at
+        ) VALUES (?, ?, ?, 0, 'in_progress', '{}', ?, ?)
+      `),
+      updateResponseTelemetry: db.prepare(`
+        UPDATE responses
+        SET 
+          answers = ?,
+          current_step = ?,
+          progress = ?,
+          updated_at = ?
+        WHERE session_uuid = ?
+      `),
+      insertTelemetryEvent: db.prepare(`
+        INSERT INTO telemetry_events (session_uuid, field_id, field_value, event_type, client_time, server_time)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `),
+      getResponseSession: db.prepare(`
+        SELECT r.* 
+        FROM responses r
+        WHERE r.survey_id = ? AND r.session_uuid = ?
+      `),
+      getTelemetryEventsRecent20: db.prepare(`
+        SELECT * FROM telemetry_events WHERE session_uuid = ? ORDER BY id DESC LIMIT 20
+      `),
+      getTelemetryEventsRecent10: db.prepare(`
+        SELECT * FROM telemetry_events WHERE session_uuid = ? ORDER BY id DESC LIMIT 10
+      `),
+      getResponsesBySurveyId: db.prepare(`
+        SELECT * FROM responses WHERE survey_id = ? ORDER BY updated_at DESC
+      `),
+      submitResponse: db.prepare(`
+        UPDATE responses
+        SET 
+          answers = ?,
+          current_step = ?,
+          progress = 100,
+          status = 'submitted',
+          updated_at = ?,
+          submitted_at = ?
+        WHERE session_uuid = ?
+      `),
+      insertSubmitEvent: db.prepare(`
+        INSERT INTO telemetry_events (session_uuid, field_id, field_value, event_type, server_time)
+        VALUES (?, ?, ?, 'submit', ?)
+      `)
+    };
+    return this._stmts;
   }
 
   createSurvey({ title, description = '', slug, questions = [] }) {
@@ -77,14 +178,14 @@ class SurveyService {
     }
 
     const cleanSlug = normalizeSlug(slug);
-    const existingSlug = this.db.prepare('SELECT id FROM surveys WHERE slug = ?').get(cleanSlug);
+    const existingSlug = this.stmts.findSurveySlug.get(cleanSlug);
     if (existingSlug) {
       throw new Error(`Ссылка со slug "${cleanSlug}" уже существует. Пожалуйста, выберите другой slug.`);
     }
 
     // Hash check for identical vacancy/survey content
     const contentHash = calculateSurveyHash({ title, description, questions });
-    const duplicate = this.db.prepare('SELECT slug, title FROM surveys WHERE content_hash = ?').get(contentHash);
+    const duplicate = this.stmts.findSurveyByHash.get(contentHash);
     if (duplicate) {
       const err = new Error(`Вакансия с идентичными данными уже существует (URL: /s/${duplicate.slug})`);
       err.statusCode = 409;
@@ -96,7 +197,7 @@ class SurveyService {
     const formattedQuestions = questions.map((q, idx) => ({
       id: q.id || `q${idx + 1}`,
       title: q.title || q.label || `Вопрос ${idx + 1}`,
-      type: q.type || 'text', // text, textarea, number, rating, single, multiple
+      type: q.type || 'text',
       options: Array.isArray(q.options) ? q.options.map(opt => typeof opt === 'string' ? opt.trim() : String(opt)).filter(Boolean) : [],
       required: Boolean(q.required),
       min: q.min ?? (q.type === 'rating' ? 1 : undefined),
@@ -104,12 +205,7 @@ class SurveyService {
     }));
 
     const createdAt = new Date().toISOString();
-    const insert = this.db.prepare(`
-      INSERT INTO surveys (slug, title, description, questions, created_at, content_hash)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    const result = insert.run(
+    const result = this.stmts.insertSurvey.run(
       cleanSlug,
       title.trim(),
       (description || '').trim(),
@@ -130,7 +226,7 @@ class SurveyService {
   }
 
   updateSurvey(slug, { title, description = '', questions, newSlug }) {
-    const existing = this.db.prepare('SELECT * FROM surveys WHERE slug = ?').get(slug);
+    const existing = this.stmts.getSurveyBySlug.get(slug);
     if (!existing) {
       const err = new Error(`Опрос "${slug}" не найден`);
       err.statusCode = 404;
@@ -166,10 +262,7 @@ class SurveyService {
       questions: formattedQuestions
     });
 
-    const duplicate = this.db.prepare(`
-      SELECT slug, title FROM surveys WHERE content_hash = ? AND id != ?
-    `).get(contentHash, existing.id);
-
+    const duplicate = this.stmts.findSurveyByHashExcludingId.get(contentHash, existing.id);
     if (duplicate) {
       const err = new Error(`Вакансия с идентичными данными уже существует (URL: /s/${duplicate.slug})`);
       err.statusCode = 409;
@@ -181,17 +274,13 @@ class SurveyService {
     let targetSlug = existing.slug;
     if (newSlug && newSlug.trim() && normalizeSlug(newSlug) !== existing.slug) {
       targetSlug = normalizeSlug(newSlug);
-      const slugClash = this.db.prepare('SELECT id FROM surveys WHERE slug = ? AND id != ?').get(targetSlug, existing.id);
+      const slugClash = this.stmts.findSurveyByIdAndSlug.get(targetSlug, existing.id);
       if (slugClash) {
         throw new Error(`Ссылка со slug "${targetSlug}" уже существует. Пожалуйста, выберите другой slug.`);
       }
     }
 
-    this.db.prepare(`
-      UPDATE surveys
-      SET title = ?, description = ?, questions = ?, content_hash = ?, slug = ?
-      WHERE id = ?
-    `).run(
+    this.stmts.updateSurvey.run(
       updatedTitle.trim(),
       (updatedDesc || '').trim(),
       JSON.stringify(formattedQuestions),
@@ -212,7 +301,7 @@ class SurveyService {
   }
 
   getSurveyBySlug(slug) {
-    const row = this.db.prepare('SELECT * FROM surveys WHERE slug = ?').get(slug);
+    const row = this.stmts.getSurveyBySlug.get(slug);
     if (!row) {
       return null;
     }
@@ -228,24 +317,7 @@ class SurveyService {
   }
 
   listSurveys() {
-    const rows = this.db.prepare(`
-      SELECT 
-        s.id,
-        s.slug,
-        s.title,
-        s.description,
-        s.created_at,
-        s.content_hash,
-        COUNT(r.id) as total_responses,
-        SUM(CASE WHEN r.status = 'submitted' THEN 1 ELSE 0 END) as submitted_count,
-        SUM(CASE WHEN r.status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_count,
-        MAX(r.updated_at) as last_activity
-      FROM surveys s
-      LEFT JOIN responses r ON r.survey_id = s.id
-      GROUP BY s.id
-      ORDER BY s.id DESC
-    `).all();
-
+    const rows = this.stmts.listSurveys.all();
     return rows.map((r) => ({
       ...r,
       total_responses: Number(r.total_responses || 0),
@@ -257,7 +329,7 @@ class SurveyService {
   deleteSurvey(slug) {
     const survey = this.getSurveyBySlug(slug);
     if (!survey) return false;
-    this.db.prepare('DELETE FROM surveys WHERE id = ?').run(survey.id);
+    this.stmts.deleteSurvey.run(survey.id);
     return true;
   }
 
@@ -268,7 +340,7 @@ class SurveyService {
     }
 
     const cleanUuid = sessionUuid || sessionId || crypto.randomUUID();
-    const existing = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
+    const existing = this.stmts.findResponseByUuid.get(cleanUuid);
 
     if (existing) {
       return {
@@ -278,14 +350,7 @@ class SurveyService {
     }
 
     const now = new Date().toISOString();
-    const insert = this.db.prepare(`
-      INSERT INTO responses (
-        survey_id, session_uuid, current_step, progress, status,
-        answers, started_at, updated_at
-      ) VALUES (?, ?, ?, 0, 'in_progress', '{}', ?, ?)
-    `);
-
-    insert.run(survey.id, cleanUuid, Number(currentStep) || 1, now, now);
+    this.stmts.insertResponse.run(survey.id, cleanUuid, Number(currentStep) || 1, now, now);
 
     return {
       survey_id: survey.id,
@@ -311,12 +376,12 @@ class SurveyService {
       throw new Error('session_uuid обязателен');
     }
 
-    let existing = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
+    let existing = this.stmts.findResponseByUuid.get(cleanUuid);
     const now = new Date().toISOString();
 
     if (!existing) {
       this.getOrCreateSession(slug, { sessionUuid: cleanUuid, currentStep });
-      existing = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
+      existing = this.stmts.findResponseByUuid.get(cleanUuid);
     }
 
     const currentAnswers = {
@@ -334,17 +399,7 @@ class SurveyService {
 
     const stepToSet = currentStep !== undefined ? Number(currentStep) : existing.current_step;
 
-    const updateResponse = this.db.prepare(`
-      UPDATE responses
-      SET 
-        answers = ?,
-        current_step = ?,
-        progress = ?,
-        updated_at = ?
-      WHERE session_uuid = ?
-    `);
-
-    updateResponse.run(
+    this.stmts.updateResponseTelemetry.run(
       JSON.stringify(currentAnswers),
       stepToSet,
       calculatedProgress,
@@ -353,12 +408,7 @@ class SurveyService {
     );
 
     // Save event to telemetry_events log
-    const insertEvent = this.db.prepare(`
-      INSERT INTO telemetry_events (session_uuid, field_id, field_value, event_type, client_time, server_time)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    insertEvent.run(
+    this.stmts.insertTelemetryEvent.run(
       cleanUuid,
       fieldId || null,
       value !== undefined ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : null,
@@ -367,7 +417,7 @@ class SurveyService {
       now
     );
 
-    const updated = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
+    const updated = this.stmts.findResponseByUuid.get(cleanUuid);
     return {
       ...updated,
       answers: JSON.parse(updated.answers)
@@ -378,17 +428,10 @@ class SurveyService {
     const survey = this.getSurveyBySlug(slug);
     if (!survey) return null;
 
-    const row = this.db.prepare(`
-      SELECT r.* 
-      FROM responses r
-      WHERE r.survey_id = ? AND r.session_uuid = ?
-    `).get(survey.id, sessionUuid);
-
+    const row = this.stmts.getResponseSession.get(survey.id, sessionUuid);
     if (!row) return null;
 
-    const events = this.db.prepare(`
-      SELECT * FROM telemetry_events WHERE session_uuid = ? ORDER BY id DESC LIMIT 20
-    `).all(sessionUuid);
+    const events = this.stmts.getTelemetryEventsRecent20.all(sessionUuid);
 
     return {
       ...row,
@@ -407,15 +450,9 @@ class SurveyService {
       throw new Error(`Опрос "${slug}" не найден`);
     }
 
-    const rows = this.db.prepare(`
-      SELECT * FROM responses WHERE survey_id = ? ORDER BY updated_at DESC
-    `).all(survey.id);
-
+    const rows = this.stmts.getResponsesBySurveyId.all(survey.id);
     const responses = rows.map((r) => {
-      const events = this.db.prepare(`
-        SELECT * FROM telemetry_events WHERE session_uuid = ? ORDER BY id DESC LIMIT 10
-      `).all(r.session_uuid);
-
+      const events = this.stmts.getTelemetryEventsRecent10.all(r.session_uuid);
       return {
         ...r,
         survey_id: survey.id,
@@ -443,7 +480,7 @@ class SurveyService {
       throw new Error('session_uuid обязателен');
     }
 
-    const existing = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
+    const existing = this.stmts.findResponseByUuid.get(cleanUuid);
     if (!existing) {
       throw new Error('Сессия не найдена');
     }
@@ -454,24 +491,17 @@ class SurveyService {
     };
 
     const now = new Date().toISOString();
-    this.db.prepare(`
-      UPDATE responses
-      SET 
-        answers = ?,
-        current_step = ?,
-        progress = 100,
-        status = 'submitted',
-        updated_at = ?,
-        submitted_at = ?
-      WHERE session_uuid = ?
-    `).run(JSON.stringify(currentAnswers), survey.questions.length, now, now, cleanUuid);
+    this.stmts.submitResponse.run(
+      JSON.stringify(currentAnswers),
+      survey.questions.length,
+      now,
+      now,
+      cleanUuid
+    );
 
-    this.db.prepare(`
-      INSERT INTO telemetry_events (session_uuid, field_id, field_value, event_type, server_time)
-      VALUES (?, ?, ?, 'submit', ?)
-    `).run(cleanUuid, null, 'SUBMITTED', now);
+    this.stmts.insertSubmitEvent.run(cleanUuid, null, 'SUBMITTED', now);
 
-    const updated = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
+    const updated = this.stmts.findResponseByUuid.get(cleanUuid);
     return {
       ...updated,
       answers: JSON.parse(updated.answers)
