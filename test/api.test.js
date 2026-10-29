@@ -49,7 +49,7 @@ describe('Survey Feedback Service API Tests', () => {
     const db = getDatabase();
 
     const surveysCols = db.pragma("table_info(surveys)").map(c => c.name);
-    assert.deepEqual(surveysCols, ['id', 'slug', 'title', 'description', 'questions', 'created_at']);
+    assert.deepEqual(surveysCols, ['id', 'slug', 'title', 'description', 'questions', 'created_at', 'content_hash']);
 
     const responsesCols = db.pragma("table_info(responses)").map(c => c.name);
     assert.deepEqual(responsesCols, [
@@ -192,6 +192,85 @@ describe('Survey Feedback Service API Tests', () => {
     assert.equal(data.responses[0].session_uuid, 'candidate-uuid-12345');
     assert.equal(data.responses[0].current_step, 2);
     assert.ok(data.responses[0].telemetry_events.length >= 2);
+  });
+
+  test('POST /api/surveys prevents creating duplicate vacancy with identical normalized content hash', async () => {
+    // Try creating duplicate with different slug but same content with spaces
+    const res = await fetch(`${baseUrl}/api/surveys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '  Анкета стажера Frontend  ',
+        description: 'Описание для соискателя позиции Frontend Intern   ',
+        slug: 'frontend-intern-duplicate',
+        questions: [
+          { id: 'diff1', title: '  ФИО ', type: 'text', required: true },
+          { id: 'diff2', title: 'Опыт в стеке от 1 до 5', type: 'rating', min: 1, max: 5, required: true },
+          { id: 'diff3', title: 'Стек технологий', type: 'multiple', options: ['React', 'Node'], required: false }
+        ]
+      })
+    });
+
+    assert.equal(res.status, 409);
+    const data = await res.json();
+    assert.equal(data.success, false);
+    assert.match(data.error, /уже существует/i);
+  });
+
+  test('PUT /api/surveys/:slug updates an existing survey successfully', async () => {
+    const res = await fetch(`${baseUrl}/api/surveys/${testSlug}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Анкета стажера Frontend (Updated)',
+        description: 'Обновленное описание вакансии',
+        questions: [
+          { id: 'q1', title: 'ФИО', type: 'text', required: true },
+          { id: 'q2', title: 'Опыт в стеке от 1 до 5', type: 'rating', min: 1, max: 5, required: true },
+          { id: 'q3', title: 'Стек технологий', type: 'multiple', options: ['React', 'Node', 'TypeScript'], required: true }
+        ]
+      })
+    });
+
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.success, true);
+    assert.equal(data.survey.title, 'Анкета стажера Frontend (Updated)');
+    assert.equal(data.survey.questions[2].options.length, 3);
+  });
+
+  test('PUT /api/surveys/:slug prevents editing a survey to match another vacancy content hash', async () => {
+    // 1. Create a distinct second vacancy
+    const resCreate = await fetch(`${baseUrl}/api/surveys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Python Backend Intern',
+        slug: 'python-intern',
+        questions: [{ id: 'q1', title: 'Опыт в Python', type: 'text', required: true }]
+      })
+    });
+    assert.equal(resCreate.status, 201);
+
+    // 2. Try to edit it to match the Frontend vacancy content hash
+    const resUpdate = await fetch(`${baseUrl}/api/surveys/python-intern`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Анкета стажера Frontend (Updated)',
+        description: 'Обновленное описание вакансии',
+        questions: [
+          { id: 'q1', title: 'ФИО', type: 'text', required: true },
+          { id: 'q2', title: 'Опыт в стеке от 1 до 5', type: 'rating', min: 1, max: 5, required: true },
+          { id: 'q3', title: 'Стек технологий', type: 'multiple', options: ['React', 'Node', 'TypeScript'], required: true }
+        ]
+      })
+    });
+
+    assert.equal(resUpdate.status, 409);
+    const data = await resUpdate.json();
+    assert.equal(data.success, false);
+    assert.match(data.error, /уже существует/i);
   });
 
   test('POST /api/surveys with duplicate slug fails gracefully', async () => {

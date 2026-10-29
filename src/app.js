@@ -43,7 +43,30 @@ function createApp(surveyServiceInstance) {
         }
       });
     } catch (err) {
-      res.status(400).json({ success: false, error: err.message });
+      const status = err.statusCode || 400;
+      res.status(status).json({ success: false, error: err.message, code: err.code });
+    }
+  });
+
+  // Update survey
+  app.put('/api/surveys/:slug', (req, res) => {
+    try {
+      const { title, description, questions, slug: newSlug } = req.body;
+      const updated = service.updateSurvey(req.params.slug, { title, description, questions, newSlug });
+      const host = req.get('host');
+      const protocol = req.protocol;
+      const shareUrl = `${protocol}://${host}/s/${updated.slug}`;
+
+      res.status(200).json({
+        success: true,
+        survey: {
+          ...updated,
+          url: shareUrl
+        }
+      });
+    } catch (err) {
+      const status = err.statusCode || (err.message.includes('не найден') ? 404 : 400);
+      res.status(status).json({ success: false, error: err.message, code: err.code });
     }
   });
 

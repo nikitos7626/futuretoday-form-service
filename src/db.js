@@ -20,8 +20,13 @@ function initDatabase(customPath) {
   dbInstance.pragma('foreign_keys = ON');
 
   // Automatic schema migration if upgrading from legacy schema
-  const existingCols = dbInstance.pragma("table_info(responses)").map(c => c.name);
-  if (existingCols.length > 0 && !existingCols.includes('session_uuid')) {
+  const surveyCols = dbInstance.pragma("table_info(surveys)").map(c => c.name);
+  if (surveyCols.length > 0 && !surveyCols.includes('content_hash')) {
+    dbInstance.exec("ALTER TABLE surveys ADD COLUMN content_hash TEXT DEFAULT NULL;");
+  }
+
+  const responseCols = dbInstance.pragma("table_info(responses)").map(c => c.name);
+  if (responseCols.length > 0 && !responseCols.includes('session_uuid')) {
     dbInstance.exec(`
       DROP TABLE IF EXISTS telemetry_events;
       DROP TABLE IF EXISTS responses;
@@ -36,7 +41,8 @@ function initDatabase(customPath) {
       title TEXT NOT NULL,
       description TEXT DEFAULT '',
       questions TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      content_hash TEXT DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS responses (
@@ -63,6 +69,7 @@ function initDatabase(customPath) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_surveys_slug ON surveys(slug);
+    CREATE INDEX IF NOT EXISTS idx_surveys_content_hash ON surveys(content_hash);
     CREATE INDEX IF NOT EXISTS idx_responses_survey_id ON responses(survey_id);
     CREATE INDEX IF NOT EXISTS idx_responses_session_uuid ON responses(session_uuid);
     CREATE INDEX IF NOT EXISTS idx_telemetry_session_uuid ON telemetry_events(session_uuid);

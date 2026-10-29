@@ -1,7 +1,8 @@
-// Admin Panel Logic (Vantage Theme)
+// Admin Panel Logic (Cobalt Theme)
 let activeTelemetrySlug = null;
 let telemetryInterval = null;
 let questions = [];
+let editingSlug = null;
 
 const slugPrefixEl = document.getElementById('slugPrefix');
 const surveySlugInput = document.getElementById('surveySlug');
@@ -12,11 +13,16 @@ const telemetrySurveyTitle = document.getElementById('telemetrySurveyTitle');
 const cardsContainer = document.getElementById('cardsContainer');
 const autoPollToggle = document.getElementById('autoPollToggle');
 const btnPollNow = document.getElementById('btnPollNow');
+const formPanelTitle = document.getElementById('formPanelTitle');
+const surveyFormPanel = document.getElementById('surveyFormPanel');
+const btnCancelEdit = document.getElementById('btnCancelEdit');
+const btnSubmitSurvey = document.getElementById('btnSubmitSurvey');
 
 // SVG Icons
 const ICON_TRASH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
 const ICON_COPY = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 const ICON_EXTERNAL = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`;
+const ICON_EDIT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
 
 // Initialize URL prefix
 if (slugPrefixEl) {
@@ -41,7 +47,7 @@ function renderQuestions() {
   questionsContainer.innerHTML = '';
   if (questions.length === 0) {
     questionsContainer.innerHTML = `
-      <div style="padding: 20px; border: 1px dashed var(--color-rule-2); border-radius: var(--radius-card); text-align: center; color: var(--color-muted); font-size: 14px;">
+      <div style="padding: 20px; border: 1px dashed var(--color-rule-2); border-radius: var(--radius-input); text-align: center; color: var(--color-muted); font-size: 14px;">
         Вопросы еще не добавлены. Нажмите "+ Добавить вопрос" выше.
       </div>
     `;
@@ -130,12 +136,29 @@ document.getElementById('btnAddQuestion').addEventListener('click', () => {
   addQuestion('text');
 });
 
-// Default starter questions
-addQuestion('text', 'ФИО');
-addQuestion('rating', 'Опыт работы (1-5)');
-addQuestion('textarea', 'Расскажите о ваших проектах');
+function initDefaultQuestions() {
+  questions = [];
+  addQuestion('text', 'ФИО');
+  addQuestion('rating', 'Опыт работы (1-5)');
+  addQuestion('textarea', 'Расскажите о ваших проектах');
+}
 
-// Form submission to create survey
+initDefaultQuestions();
+
+function resetSurveyForm() {
+  editingSlug = null;
+  formPanelTitle.textContent = 'Создать новый опрос';
+  btnSubmitSurvey.textContent = 'Создать опрос и сгенерировать ссылку';
+  btnCancelEdit.style.display = 'none';
+  document.getElementById('surveyTitle').value = '';
+  document.getElementById('surveyDesc').value = '';
+  surveySlugInput.value = '';
+  initDefaultQuestions();
+}
+
+btnCancelEdit.addEventListener('click', resetSurveyForm);
+
+// Form submission to create or update survey
 document.getElementById('createSurveyForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const title = document.getElementById('surveyTitle').value.trim();
@@ -147,13 +170,16 @@ document.getElementById('createSurveyForm').addEventListener('submit', async (e)
     return;
   }
 
-  const btn = document.getElementById('btnSubmitSurvey');
-  btn.disabled = true;
-  btn.textContent = 'Создание…';
+  btnSubmitSurvey.disabled = true;
+  btnSubmitSurvey.textContent = editingSlug ? 'Сохранение изменений…' : 'Создание…';
 
   try {
-    const res = await fetch('/api/surveys', {
-      method: 'POST',
+    const isEdit = Boolean(editingSlug);
+    const url = isEdit ? `/api/surveys/${editingSlug}` : '/api/surveys';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title,
@@ -165,25 +191,64 @@ document.getElementById('createSurveyForm').addEventListener('submit', async (e)
 
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'Ошибка при создании анкеты');
+      throw new Error(data.error || 'Ошибка при сохранении анкеты');
     }
 
-    alert(`Анкета успешно создана!\nСсылка для соискателей:\n${data.survey.url}`);
-    
-    // Clear inputs and regenerate slug
-    document.getElementById('surveyTitle').value = '';
-    document.getElementById('surveyDesc').value = '';
-    surveySlugInput.value = '';
-    
+    if (isEdit) {
+      alert(`Анкета успешно обновлена!\nСсылка: ${data.survey.url}`);
+      const updatedSlug = data.survey.slug;
+      if (activeTelemetrySlug === editingSlug) {
+        openTelemetry(updatedSlug, data.survey.title);
+      }
+    } else {
+      alert(`Анкета успешно создана!\nСсылка для соискателей:\n${data.survey.url}`);
+      openTelemetry(data.survey.slug, data.survey.title);
+    }
+
+    resetSurveyForm();
     await loadSurveys();
-    openTelemetry(data.survey.slug, data.survey.title);
   } catch (err) {
     alert(`Ошибка: ${err.message}`);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Создать опрос и сгенерировать ссылку';
+    btnSubmitSurvey.disabled = false;
+    btnSubmitSurvey.textContent = editingSlug ? 'Сохранить изменения' : 'Создать опрос и сгенерировать ссылку';
   }
 });
+
+// Edit existing survey
+window.editSurvey = async function(slug) {
+  try {
+    const res = await fetch(`/api/surveys/${slug}`);
+    if (!res.ok) throw new Error('Не удалось загрузить данные опроса');
+    const data = await res.json();
+    const survey = data.survey;
+
+    editingSlug = slug;
+    formPanelTitle.textContent = `Редактирование анкеты: ${survey.title}`;
+    btnSubmitSurvey.textContent = 'Сохранить изменения';
+    btnCancelEdit.style.display = 'inline-flex';
+
+    document.getElementById('surveyTitle').value = survey.title || '';
+    document.getElementById('surveyDesc').value = survey.description || '';
+    surveySlugInput.value = survey.slug || '';
+
+    questions = (survey.questions || []).map((q, idx) => ({
+      id: q.id || `q${idx + 1}`,
+      title: q.title || q.label || `Вопрос ${idx + 1}`,
+      label: q.title || q.label || `Вопрос ${idx + 1}`,
+      type: q.type || 'text',
+      required: Boolean(q.required),
+      options: Array.isArray(q.options) ? [...q.options] : [],
+      min: q.min,
+      max: q.max
+    }));
+
+    renderQuestions();
+    surveyFormPanel.scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    alert(`Ошибка: ${err.message}`);
+  }
+};
 
 // Load surveys list
 async function loadSurveys() {
@@ -230,8 +295,9 @@ async function loadSurveys() {
           </span>
         </td>
         <td>
-          <div style="display: flex; gap: 8px;">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
             <a href="${s.url}" target="_blank" class="btn btn-secondary btn-sm">${ICON_EXTERNAL} Открыть</a>
+            <button class="btn btn-secondary btn-sm" onclick="editSurvey('${s.slug}')">${ICON_EDIT} Изменить</button>
             <button class="btn btn-primary btn-sm" onclick="openTelemetry('${s.slug}', '${escapeHtml(s.title)}')">Телеметрия</button>
             <button class="btn btn-danger btn-sm" onclick="deleteSurvey('${s.slug}')" aria-label="Удалить">${ICON_TRASH}</button>
           </div>
@@ -262,6 +328,9 @@ window.deleteSurvey = async function(slug) {
     if (!res.ok) throw new Error('Ошибка удаления');
     if (activeTelemetrySlug === slug) {
       closeTelemetry();
+    }
+    if (editingSlug === slug) {
+      resetSurveyForm();
     }
     loadSurveys();
   } catch (err) {
@@ -377,11 +446,11 @@ function renderTelemetryCards(responses) {
         </div>
 
         <div class="answers-summary">
-          <div style="font-weight: 400; font-size: 11px; margin-bottom: 6px; color: var(--color-muted);">
+          <div style="font-weight: 400; font-size: 11px; margin-bottom: 6px; color: var(--color-graphite-muted);">
             Ответы кандидата (SQLite):
           </div>
           ${answerEntries.length === 0 ? `
-            <div style="color: var(--color-muted); font-style: italic;">Пока нет ответов</div>
+            <div style="color: var(--color-graphite-muted); font-style: italic;">Пока нет ответов</div>
           ` : answerEntries.map(([qId, val]) => `
             <div class="answer-row">
               <span class="answer-q">${escapeHtml(qId)}:</span>

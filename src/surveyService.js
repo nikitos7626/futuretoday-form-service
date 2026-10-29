@@ -16,6 +16,35 @@ function normalizeSlug(slug) {
     .replace(/^-|-$/g, '') || generateSlug();
 }
 
+function normalizeString(str) {
+  if (!str) return '';
+  return str.toString().trim().replace(/\s+/g, ' ');
+}
+
+function normalizeQuestionsForHash(questions) {
+  if (!Array.isArray(questions)) return [];
+  return questions.map(q => ({
+    title: normalizeString(q.title || q.label),
+    type: normalizeString(q.type || 'text').toLowerCase(),
+    options: Array.isArray(q.options)
+      ? q.options.map(opt => normalizeString(opt)).filter(Boolean)
+      : [],
+    required: Boolean(q.required),
+    min: q.min !== undefined && q.min !== null ? Number(q.min) : undefined,
+    max: q.max !== undefined && q.max !== null ? Number(q.max) : undefined
+  }));
+}
+
+function calculateSurveyHash({ title, description = '', questions = [] }) {
+  const normalized = {
+    title: normalizeString(title),
+    description: normalizeString(description),
+    questions: normalizeQuestionsForHash(questions)
+  };
+  const canonicalJson = JSON.stringify(normalized);
+  return crypto.createHash('sha256').update(canonicalJson).digest('hex');
+}
+
 function calculateProgress(questions, answers) {
   if (!Array.isArray(questions) || questions.length === 0) return 0;
   let answeredCount = 0;
@@ -48,17 +77,27 @@ class SurveyService {
     }
 
     const cleanSlug = normalizeSlug(slug);
-    const existing = this.db.prepare('SELECT id FROM surveys WHERE slug = ?').get(cleanSlug);
-    if (existing) {
+    const existingSlug = this.db.prepare('SELECT id FROM surveys WHERE slug = ?').get(cleanSlug);
+    if (existingSlug) {
       throw new Error(`Ссылка со slug "${cleanSlug}" уже существует. Пожалуйста, выберите другой slug.`);
+    }
+
+    // Hash check for identical vacancy/survey content
+    const contentHash = calculateSurveyHash({ title, description, questions });
+    const duplicate = this.db.prepare('SELECT slug, title FROM surveys WHERE content_hash = ?').get(contentHash);
+    if (duplicate) {
+      const err = new Error(`Вакансия с идентичными данными уже существует (URL: /s/${duplicate.slug})`);
+      err.statusCode = 409;
+      err.code = 'DUPLICATE_CONTENT';
+      throw err;
     }
 
     // Format questions array: [{ id: "q1", title: "ФИО", type: "text" }, ...]
     const formattedQuestions = questions.map((q, idx) => ({
-      id: q.id || `q_${idx + 1}`,
+      id: q.id || `q${idx + 1}`,
       title: q.title || q.label || `Вопрос ${idx + 1}`,
       type: q.type || 'text', // text, textarea, number, rating, single, multiple
-      options: Array.isArray(q.options) ? q.options : [],
+      options: Array.isArray(q.options) ? q.options.map(opt => typeof opt === 'string' ? opt.trim() : String(opt)).filter(Boolean) : [],
       required: Boolean(q.required),
       min: q.min ?? (q.type === 'rating' ? 1 : undefined),
       max: q.max ?? (q.type === 'rating' ? 5 : undefined)
@@ -66,8 +105,8 @@ class SurveyService {
 
     const createdAt = new Date().toISOString();
     const insert = this.db.prepare(`
-      INSERT INTO surveys (slug, title, description, questions, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO surveys (slug, title, description, questions, created_at, content_hash)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
     const result = insert.run(
@@ -75,7 +114,8 @@ class SurveyService {
       title.trim(),
       (description || '').trim(),
       JSON.stringify(formattedQuestions),
-      createdAt
+      createdAt,
+      contentHash
     );
 
     return {
@@ -84,7 +124,90 @@ class SurveyService {
       title: title.trim(),
       description: (description || '').trim(),
       questions: formattedQuestions,
-      created_at: createdAt
+      created_at: createdAt,
+      content_hash: contentHash
+    };
+  }
+
+  updateSurvey(slug, { title, description = '', questions, newSlug }) {
+    const existing = this.db.prepare('SELECT * FROM surveys WHERE slug = ?').get(slug);
+    if (!existing) {
+      const err = new Error(`Опрос "${slug}" не найден`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const updatedTitle = title !== undefined ? title : existing.title;
+    const updatedDesc = description !== undefined ? description : existing.description;
+    const updatedQuestionsRaw = questions !== undefined ? questions : JSON.parse(existing.questions);
+
+    if (!updatedTitle || typeof updatedTitle !== 'string' || !updatedTitle.trim()) {
+      throw new Error('Название анкеты обязательно');
+    }
+    if (!Array.isArray(updatedQuestionsRaw) || updatedQuestionsRaw.length === 0) {
+      throw new Error('Анкета должна содержать хотя бы один вопрос');
+    }
+
+    // Format questions
+    const formattedQuestions = updatedQuestionsRaw.map((q, idx) => ({
+      id: q.id || `q${idx + 1}`,
+      title: q.title || q.label || `Вопрос ${idx + 1}`,
+      type: q.type || 'text',
+      options: Array.isArray(q.options) ? q.options.map(opt => typeof opt === 'string' ? opt.trim() : String(opt)).filter(Boolean) : [],
+      required: Boolean(q.required),
+      min: q.min ?? (q.type === 'rating' ? 1 : undefined),
+      max: q.max ?? (q.type === 'rating' ? 5 : undefined)
+    }));
+
+    // Content hash check (excluding this survey id)
+    const contentHash = calculateSurveyHash({
+      title: updatedTitle,
+      description: updatedDesc,
+      questions: formattedQuestions
+    });
+
+    const duplicate = this.db.prepare(`
+      SELECT slug, title FROM surveys WHERE content_hash = ? AND id != ?
+    `).get(contentHash, existing.id);
+
+    if (duplicate) {
+      const err = new Error(`Вакансия с идентичными данными уже существует (URL: /s/${duplicate.slug})`);
+      err.statusCode = 409;
+      err.code = 'DUPLICATE_CONTENT';
+      throw err;
+    }
+
+    // Target slug
+    let targetSlug = existing.slug;
+    if (newSlug && newSlug.trim() && normalizeSlug(newSlug) !== existing.slug) {
+      targetSlug = normalizeSlug(newSlug);
+      const slugClash = this.db.prepare('SELECT id FROM surveys WHERE slug = ? AND id != ?').get(targetSlug, existing.id);
+      if (slugClash) {
+        throw new Error(`Ссылка со slug "${targetSlug}" уже существует. Пожалуйста, выберите другой slug.`);
+      }
+    }
+
+    this.db.prepare(`
+      UPDATE surveys
+      SET title = ?, description = ?, questions = ?, content_hash = ?, slug = ?
+      WHERE id = ?
+    `).run(
+      updatedTitle.trim(),
+      (updatedDesc || '').trim(),
+      JSON.stringify(formattedQuestions),
+      contentHash,
+      targetSlug,
+      existing.id
+    );
+
+    return {
+      id: existing.id,
+      slug: targetSlug,
+      title: updatedTitle.trim(),
+      description: (updatedDesc || '').trim(),
+      questions: formattedQuestions,
+      created_at: existing.created_at,
+      content_hash: contentHash
     };
   }
 
@@ -99,7 +222,8 @@ class SurveyService {
       title: row.title,
       description: row.description,
       questions: JSON.parse(row.questions),
-      created_at: row.created_at
+      created_at: row.created_at,
+      content_hash: row.content_hash
     };
   }
 
@@ -111,6 +235,7 @@ class SurveyService {
         s.title,
         s.description,
         s.created_at,
+        s.content_hash,
         COUNT(r.id) as total_responses,
         SUM(CASE WHEN r.status = 'submitted' THEN 1 ELSE 0 END) as submitted_count,
         SUM(CASE WHEN r.status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_count,
@@ -343,5 +468,7 @@ class SurveyService {
 module.exports = {
   SurveyService,
   normalizeSlug,
+  normalizeString,
+  calculateSurveyHash,
   calculateProgress
 };
