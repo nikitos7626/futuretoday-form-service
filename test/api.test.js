@@ -20,7 +20,7 @@ describe('Survey Feedback Service API Tests', () => {
     process.env.PORT = '0'; // random available port
 
     const createApp = require('../src/app');
-    const { initDatabase } = require('../src/db');
+    const { initDatabase, closeDatabase } = require('../src/db');
     initDatabase(testDbPath);
     app = createApp();
 
@@ -37,6 +37,8 @@ describe('Survey Feedback Service API Tests', () => {
     if (server) {
       await new Promise((resolve) => server.close(resolve));
     }
+    const { closeDatabase } = require('../src/db');
+    closeDatabase();
     if (fs.existsSync(testDbPath)) {
       try { fs.unlinkSync(testDbPath); } catch {}
     }

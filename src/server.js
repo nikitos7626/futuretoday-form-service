@@ -1,5 +1,5 @@
 const { PORT } = require('./config');
-const { initDatabase } = require('./db');
+const { initDatabase, closeDatabase } = require('./db');
 const createApp = require('./app');
 
 // Initialize SQLite database
@@ -15,8 +15,14 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`=======================================================`);
 });
 
-process.on('SIGTERM', () => {
+function gracefulShutdown(signal) {
+  console.log(`\nПолучен сигнал ${signal}. Завершение работы сервера...`);
   server.close(() => {
-    console.log('Сервер остановлен');
+    closeDatabase();
+    console.log('База данных SQLite закрыта. Сервер остановлен.');
+    process.exit(0);
   });
-});
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

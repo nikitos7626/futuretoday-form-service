@@ -71,7 +71,17 @@ function getDatabase() {
   return dbInstance;
 }
 
+function closeDatabase() {
+  if (dbInstance) {
+    if (dbInstance.open) {
+      dbInstance.close();
+    }
+    dbInstance = null;
+  }
+}
+
 module.exports = {
   initDatabase,
-  getDatabase
+  getDatabase,
+  closeDatabase
 };
