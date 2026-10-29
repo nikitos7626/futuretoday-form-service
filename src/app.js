@@ -182,6 +182,7 @@ function createApp(surveyServiceInstance) {
   // Poll all response cards & live telemetry for admin
   app.get('/api/surveys/:slug/responses', (req, res) => {
     try {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       const result = service.getSurveyResponses(req.params.slug);
       const host = req.get('host');
       const protocol = req.protocol;

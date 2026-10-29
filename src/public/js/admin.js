@@ -198,11 +198,12 @@ document.getElementById('createSurveyForm').addEventListener('submit', async (e)
       alert(`Анкета успешно обновлена!\nСсылка: ${data.survey.url}`);
       const updatedSlug = data.survey.slug;
       if (activeTelemetrySlug === editingSlug) {
-        openTelemetry(updatedSlug, data.survey.title);
+        activeTelemetrySlug = updatedSlug;
+        telemetrySurveyTitle.textContent = data.survey.title;
+        pollResponses();
       }
     } else {
       alert(`Анкета успешно создана!\nСсылка для соискателей:\n${data.survey.url}`);
-      openTelemetry(data.survey.slug, data.survey.title);
     }
 
     resetSurveyForm();
@@ -340,6 +341,8 @@ window.deleteSurvey = async function(slug) {
 
 // Telemetry Real-time Polling
 let activeSurveyMeta = null;
+let pollTimeout = null;
+let isPolling = false;
 
 window.openTelemetry = function(slug, title) {
   activeTelemetrySlug = slug;
@@ -348,43 +351,76 @@ window.openTelemetry = function(slug, title) {
   telemetrySection.style.display = 'block';
   telemetrySection.scrollIntoView({ behavior: 'smooth' });
 
-  pollResponses();
-  startTelemetryPolling();
+  // Single immediate poll
+  pollResponses().then(() => {
+    scheduleNextPoll();
+  });
 };
 
-function closeTelemetry() {
+window.closeTelemetry = function() {
   activeTelemetrySlug = null;
   activeSurveyMeta = null;
   telemetrySection.style.display = 'none';
-  if (telemetryInterval) {
-    clearInterval(telemetryInterval);
-    telemetryInterval = null;
+  stopTelemetryPolling();
+};
+
+function stopTelemetryPolling() {
+  if (pollTimeout) {
+    clearTimeout(pollTimeout);
+    pollTimeout = null;
   }
 }
 
-function startTelemetryPolling() {
-  if (telemetryInterval) clearInterval(telemetryInterval);
-  if (autoPollToggle.checked) {
-    telemetryInterval = setInterval(pollResponses, 2000);
+function getPollInterval() {
+  const sel = document.getElementById('pollIntervalSelect');
+  return sel ? Math.max(2000, Number(sel.value) || 5000) : 5000;
+}
+
+function scheduleNextPoll() {
+  stopTelemetryPolling();
+  if (autoPollToggle && autoPollToggle.checked && activeTelemetrySlug && !document.hidden) {
+    pollTimeout = setTimeout(async () => {
+      await pollResponses();
+      scheduleNextPoll();
+    }, getPollInterval());
   }
 }
+
+// Pause polling when browser tab is inactive / hidden
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopTelemetryPolling();
+  } else if (autoPollToggle && autoPollToggle.checked && activeTelemetrySlug) {
+    scheduleNextPoll();
+  }
+});
 
 autoPollToggle.addEventListener('change', () => {
   if (autoPollToggle.checked) {
-    startTelemetryPolling();
-  } else if (telemetryInterval) {
-    clearInterval(telemetryInterval);
-    telemetryInterval = null;
+    pollResponses().then(scheduleNextPoll);
+  } else {
+    stopTelemetryPolling();
   }
 });
+
+const pollIntervalSelect = document.getElementById('pollIntervalSelect');
+if (pollIntervalSelect) {
+  pollIntervalSelect.addEventListener('change', () => {
+    if (autoPollToggle && autoPollToggle.checked) {
+      scheduleNextPoll();
+    }
+  });
+}
 
 btnPollNow.addEventListener('click', () => {
   pollResponses();
 });
 
 async function pollResponses() {
-  if (!activeTelemetrySlug) return;
+  if (!activeTelemetrySlug || isPolling) return;
+  if (document.hidden && autoPollToggle && autoPollToggle.checked) return;
 
+  isPolling = true;
   const indicator = document.getElementById('pollingIndicator');
   if (indicator) indicator.style.opacity = '1';
 
@@ -402,6 +438,7 @@ async function pollResponses() {
   } catch (err) {
     console.error('Ошибка телеметрии:', err);
   } finally {
+    isPolling = false;
     setTimeout(() => {
       if (indicator) indicator.style.opacity = '0.4';
     }, 400);

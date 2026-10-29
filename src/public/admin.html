@@ -128,11 +128,17 @@
           <h2 class="panel-title">Телеметрия карточек в реальном времени: <strong id="telemetrySurveyTitle"></strong></h2>
           <span class="pulse-dot" id="pollingIndicator"></span>
         </div>
-        <div style="display: flex; gap: 12px; align-items: center;">
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
           <label style="margin: 0; font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
-            <input type="checkbox" id="autoPollToggle" checked> Авто-опрос каждые 2с
+            <input type="checkbox" id="autoPollToggle"> Авто-опрос
           </label>
+          <select id="pollIntervalSelect" aria-label="Интервал авто-опроса" style="padding: 4px 8px; font-size: 12px; border-radius: var(--radius-input); border: var(--rule-hair) solid var(--color-rule-2); background: var(--color-paper); color: var(--color-ink);">
+            <option value="5000" selected>каждые 5 сек</option>
+            <option value="10000">каждые 10 сек</option>
+            <option value="30000">каждые 30 сек</option>
+          </select>
           <button class="btn btn-secondary btn-sm" id="btnPollNow">Опросить сейчас</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnCloseTelemetry" onclick="closeTelemetry()">Закрыть</button>
         </div>
       </div>
 
