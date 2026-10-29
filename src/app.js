@@ -173,8 +173,19 @@ function createApp(surveyServiceInstance) {
   // Poll all response cards & live telemetry for admin
   app.get('/api/surveys/:slug/responses', (req, res) => {
     try {
-      const responses = service.getSurveyResponses(req.params.slug);
-      res.json({ success: true, responses });
+      const result = service.getSurveyResponses(req.params.slug);
+      const host = req.get('host');
+      const protocol = req.protocol;
+      const survey = result.survey;
+      const surveyUrl = `${protocol}://${host}/s/${survey.slug}`;
+      res.json({
+        success: true,
+        survey: {
+          ...survey,
+          url: surveyUrl
+        },
+        responses: result.responses
+      });
     } catch (err) {
       res.status(400).json({ success: false, error: err.message });
     }

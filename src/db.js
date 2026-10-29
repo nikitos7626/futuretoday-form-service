@@ -16,16 +16,24 @@ function initDatabase(customPath) {
   }
 
   dbInstance = new Database(targetPath);
-  dbInstance.pragma('journal_mode = WAL');
-  dbInstance.pragma('foreign_keys = ON');
+  dbInstance.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+
+  // Retain statement references so V8 GC does not finalize them during Isolate::Dispose (Node 24 bug)
+  global.__sqlite_statements = global.__sqlite_statements || new Set();
+  const origPrepare = dbInstance.prepare.bind(dbInstance);
+  dbInstance.prepare = function(sql) {
+    const stmt = origPrepare(sql);
+    global.__sqlite_statements.add(stmt);
+    return stmt;
+  };
 
   // Automatic schema migration if upgrading from legacy schema
-  const surveyCols = dbInstance.pragma("table_info(surveys)").map(c => c.name);
+  const surveyCols = dbInstance.prepare("PRAGMA table_info(surveys)").all().map(c => c.name);
   if (surveyCols.length > 0 && !surveyCols.includes('content_hash')) {
     dbInstance.exec("ALTER TABLE surveys ADD COLUMN content_hash TEXT DEFAULT NULL;");
   }
 
-  const responseCols = dbInstance.pragma("table_info(responses)").map(c => c.name);
+  const responseCols = dbInstance.prepare("PRAGMA table_info(responses)").all().map(c => c.name);
   if (responseCols.length > 0 && !responseCols.includes('session_uuid')) {
     dbInstance.exec(`
       DROP TABLE IF EXISTS telemetry_events;

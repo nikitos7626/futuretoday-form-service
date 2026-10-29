@@ -48,10 +48,10 @@ describe('Survey Feedback Service API Tests', () => {
     const { getDatabase } = require('../src/db');
     const db = getDatabase();
 
-    const surveysCols = db.pragma("table_info(surveys)").map(c => c.name);
+    const surveysCols = db.prepare("PRAGMA table_info(surveys)").all().map(c => c.name);
     assert.deepEqual(surveysCols, ['id', 'slug', 'title', 'description', 'questions', 'created_at', 'content_hash']);
 
-    const responsesCols = db.pragma("table_info(responses)").map(c => c.name);
+    const responsesCols = db.prepare("PRAGMA table_info(responses)").all().map(c => c.name);
     assert.deepEqual(responsesCols, [
       'id',
       'survey_id',
@@ -181,17 +181,33 @@ describe('Survey Feedback Service API Tests', () => {
     assert.equal(data.answers.q1, 'Иван');
     assert.equal(data.answers.q2, 5);
     assert.equal(data.status, 'in_progress');
+    assert.equal(data.survey_slug, testSlug);
+    assert.equal(data.survey_title, 'Анкета стажера Frontend');
+    assert.ok(Array.isArray(data.survey_questions));
+    assert.equal(data.survey_questions[0].title, 'ФИО');
   });
 
-  test('GET /api/surveys/:slug/responses returns all response cards with session_uuid and current_step for admin', async () => {
+  test('GET /api/surveys/:slug/responses returns all response cards with survey metadata and question definitions for admin', async () => {
     const res = await fetch(`${baseUrl}/api/surveys/${testSlug}/responses`);
     assert.equal(res.status, 200);
     const data = await res.json();
+    assert.equal(data.success, true);
     assert.equal(Array.isArray(data.responses), true);
     assert.equal(data.responses.length, 1);
     assert.equal(data.responses[0].session_uuid, 'candidate-uuid-12345');
     assert.equal(data.responses[0].current_step, 2);
+    assert.equal(data.responses[0].survey_slug, testSlug);
+    assert.equal(data.responses[0].survey_title, 'Анкета стажера Frontend');
     assert.ok(data.responses[0].telemetry_events.length >= 2);
+
+    // Verify source survey reference & questions for cards
+    assert.ok(data.survey);
+    assert.equal(data.survey.slug, testSlug);
+    assert.equal(data.survey.title, 'Анкета стажера Frontend');
+    assert.match(data.survey.url, new RegExp(`/s/${testSlug}`));
+    assert.ok(Array.isArray(data.survey.questions));
+    assert.equal(data.survey.questions[0].title, 'ФИО');
+    assert.equal(data.survey.questions[1].title, 'Опыт в стеке от 1 до 5');
   });
 
   test('POST /api/surveys prevents creating duplicate vacancy with identical normalized content hash', async () => {

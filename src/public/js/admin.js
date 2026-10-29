@@ -339,8 +339,11 @@ window.deleteSurvey = async function(slug) {
 };
 
 // Telemetry Real-time Polling
+let activeSurveyMeta = null;
+
 window.openTelemetry = function(slug, title) {
   activeTelemetrySlug = slug;
+  activeSurveyMeta = null;
   telemetrySurveyTitle.textContent = title || slug;
   telemetrySection.style.display = 'block';
   telemetrySection.scrollIntoView({ behavior: 'smooth' });
@@ -351,6 +354,7 @@ window.openTelemetry = function(slug, title) {
 
 function closeTelemetry() {
   activeTelemetrySlug = null;
+  activeSurveyMeta = null;
   telemetrySection.style.display = 'none';
   if (telemetryInterval) {
     clearInterval(telemetryInterval);
@@ -388,7 +392,13 @@ async function pollResponses() {
     const res = await fetch(`/api/surveys/${activeTelemetrySlug}/responses`);
     if (!res.ok) throw new Error('Ошибка запроса телеметрии');
     const data = await res.json();
-    renderTelemetryCards(data.responses || []);
+    if (data.survey) {
+      activeSurveyMeta = data.survey;
+      if (data.survey.title) {
+        telemetrySurveyTitle.textContent = data.survey.title;
+      }
+    }
+    renderTelemetryCards(data.responses || [], activeSurveyMeta);
   } catch (err) {
     console.error('Ошибка телеметрии:', err);
   } finally {
@@ -398,7 +408,7 @@ async function pollResponses() {
   }
 }
 
-function renderTelemetryCards(responses) {
+function renderTelemetryCards(responses, surveyMeta) {
   const total = responses.length;
   const inProgress = responses.filter(r => r.status === 'in_progress').length;
   const submitted = responses.filter(r => r.status === 'submitted').length;
@@ -416,12 +426,86 @@ function renderTelemetryCards(responses) {
     return;
   }
 
+  const surveyQuestions = (surveyMeta?.questions && Array.isArray(surveyMeta.questions)) ? surveyMeta.questions : [];
+
   cardsContainer.innerHTML = responses.map(r => {
     const answers = r.answers || {};
-    const answerEntries = Object.entries(answers);
     const lastUpdateFormatted = new Date(r.updated_at).toLocaleTimeString();
-    const candidateName = answers.q1 ? String(answers.q1) : 'Соискатель';
     const uuidStr = r.session_uuid || r.session_id || '';
+    const surveySlug = r.survey_slug || surveyMeta?.slug || activeTelemetrySlug || '';
+    const surveyTitle = r.survey_title || surveyMeta?.title || surveySlug;
+    const surveyUrl = surveyMeta?.url || `/s/${encodeURIComponent(surveySlug)}`;
+
+    // Resolve candidate name dynamically
+    let candidateName = 'Соискатель';
+    if (surveyQuestions.length > 0) {
+      const nameQ = surveyQuestions.find(q => /фио|имя|имени|name|fio/i.test(q.title || q.label || '')) || surveyQuestions[0];
+      if (nameQ && answers[nameQ.id]) {
+        candidateName = String(answers[nameQ.id]);
+      }
+    } else if (answers.q1) {
+      candidateName = String(answers.q1);
+    }
+
+    // Build question-and-answers rows
+    const handledQuestionIds = new Set();
+    let questionsHtml = '';
+
+    if (surveyQuestions.length > 0) {
+      questionsHtml = surveyQuestions.map((q, idx) => {
+        handledQuestionIds.add(q.id);
+        const qTitle = q.title || q.label || `Вопрос ${idx + 1}`;
+        const rawVal = answers[q.id];
+        const hasAnswer = rawVal !== undefined && rawVal !== null && rawVal !== '' && (!Array.isArray(rawVal) || rawVal.length > 0);
+        const displayVal = hasAnswer
+          ? (Array.isArray(rawVal) ? rawVal.join(', ') : String(rawVal))
+          : '';
+        const isCurrentStep = Number(r.current_step) === (idx + 1);
+
+        return `
+          <div class="answer-item">
+            <div class="answer-q-header">
+              <span class="answer-q-num">№${idx + 1}</span>
+              <span class="answer-q-title">${escapeHtml(qTitle)}</span>
+              ${q.required ? '<span class="answer-q-req" title="Обязательный вопрос">*</span>' : ''}
+            </div>
+            <div class="answer-v-row">
+              ${hasAnswer ? `
+                <span class="answer-v-text">${escapeHtml(displayVal)}</span>
+              ` : `
+                <span class="answer-v-empty">${isCurrentStep && r.status === 'in_progress' ? 'Заполняется сейчас…' : '— ожидает ответа'}</span>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Any answers not in survey.questions
+    const extraAnswers = Object.entries(answers).filter(([k]) => !handledQuestionIds.has(k));
+    if (extraAnswers.length > 0) {
+      questionsHtml += extraAnswers.map(([qId, val]) => `
+        <div class="answer-item">
+          <div class="answer-q-header">
+            <span class="answer-q-title">${escapeHtml(qId)}</span>
+          </div>
+          <div class="answer-v-row">
+            <span class="answer-v-text">${escapeHtml(Array.isArray(val) ? val.join(', ') : String(val))}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    if (!questionsHtml) {
+      questionsHtml = `<div class="answer-v-empty" style="padding: 4px 0;">Пока нет ответов</div>`;
+    }
+
+    const answeredCount = surveyQuestions.length > 0
+      ? surveyQuestions.filter(q => {
+          const v = answers[q.id];
+          return v !== undefined && v !== null && v !== '' && (!Array.isArray(v) || v.length > 0);
+        }).length
+      : Object.keys(answers).length;
     
     return `
       <div class="respondent-card" style="border-left: 3px solid ${r.status === 'submitted' ? 'var(--color-accent)' : 'var(--color-warning)'}">
@@ -432,9 +516,22 @@ function renderTelemetryCards(responses) {
           </span>
         </div>
 
+        <div class="respondent-survey-ref">
+          <span class="ref-label">Исходный опрос:</span>
+          <a href="${escapeHtml(surveyUrl)}" target="_blank" rel="noopener noreferrer" class="survey-ref-link" title="Открыть исходный опрос">
+            <span class="survey-ref-title">${escapeHtml(surveyTitle)}</span>
+            <span class="survey-ref-badge">/s/${escapeHtml(surveySlug)}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+          </a>
+        </div>
+
         <div class="respondent-meta">
           UUID: <code>${escapeHtml(uuidStr.slice(0, 18))}…</code><br>
-          Текущий вопрос: <strong class="num">${r.current_step || 1}</strong> · Активность: <strong class="num">${lastUpdateFormatted}</strong>
+          Текущий шаг: <strong class="num">${r.current_step || 1}</strong> из <strong class="num">${surveyQuestions.length || '?'}</strong> · Активность: <strong class="num">${lastUpdateFormatted}</strong>
         </div>
 
         <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
@@ -446,17 +543,11 @@ function renderTelemetryCards(responses) {
         </div>
 
         <div class="answers-summary">
-          <div style="font-weight: 400; font-size: 11px; margin-bottom: 6px; color: var(--color-graphite-muted);">
-            Ответы кандидата (SQLite):
+          <div class="answers-summary-title">
+            <span>Вопросы и ответы соискателя:</span>
+            <span class="num">${answeredCount} / ${surveyQuestions.length || Object.keys(answers).length}</span>
           </div>
-          ${answerEntries.length === 0 ? `
-            <div style="color: var(--color-graphite-muted); font-style: italic;">Пока нет ответов</div>
-          ` : answerEntries.map(([qId, val]) => `
-            <div class="answer-row">
-              <span class="answer-q">${escapeHtml(qId)}:</span>
-              <span class="answer-v">${escapeHtml(Array.isArray(val) ? val.join(', ') : String(val))}</span>
-            </div>
-          `).join('')}
+          ${questionsHtml}
         </div>
 
         ${r.telemetry_events && r.telemetry_events.length > 0 ? `

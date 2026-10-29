@@ -375,12 +375,14 @@ class SurveyService {
   }
 
   getResponseSession(slug, sessionUuid) {
+    const survey = this.getSurveyBySlug(slug);
+    if (!survey) return null;
+
     const row = this.db.prepare(`
       SELECT r.* 
       FROM responses r
-      JOIN surveys s ON s.id = r.survey_id
-      WHERE s.slug = ? AND r.session_uuid = ?
-    `).get(slug, sessionUuid);
+      WHERE r.survey_id = ? AND r.session_uuid = ?
+    `).get(survey.id, sessionUuid);
 
     if (!row) return null;
 
@@ -390,6 +392,10 @@ class SurveyService {
 
     return {
       ...row,
+      survey_id: survey.id,
+      survey_slug: survey.slug,
+      survey_title: survey.title,
+      survey_questions: survey.questions,
       answers: JSON.parse(row.answers),
       telemetry_events: events
     };
@@ -401,21 +407,29 @@ class SurveyService {
       throw new Error(`Опрос "${slug}" не найден`);
     }
 
-    const responses = this.db.prepare(`
+    const rows = this.db.prepare(`
       SELECT * FROM responses WHERE survey_id = ? ORDER BY updated_at DESC
     `).all(survey.id);
 
-    return responses.map((r) => {
+    const responses = rows.map((r) => {
       const events = this.db.prepare(`
         SELECT * FROM telemetry_events WHERE session_uuid = ? ORDER BY id DESC LIMIT 10
       `).all(r.session_uuid);
 
       return {
         ...r,
+        survey_id: survey.id,
+        survey_slug: survey.slug,
+        survey_title: survey.title,
         answers: JSON.parse(r.answers),
         telemetry_events: events
       };
     });
+
+    return {
+      survey,
+      responses
+    };
   }
 
   submitSurvey(slug, { sessionUuid, sessionId, answers = {} }) {
