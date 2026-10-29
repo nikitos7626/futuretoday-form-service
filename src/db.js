@@ -19,7 +19,16 @@ function initDatabase(customPath) {
   dbInstance.pragma('journal_mode = WAL');
   dbInstance.pragma('foreign_keys = ON');
 
-  // Schema creation
+  // Automatic schema migration if upgrading from legacy schema
+  const existingCols = dbInstance.pragma("table_info(responses)").map(c => c.name);
+  if (existingCols.length > 0 && !existingCols.includes('session_uuid')) {
+    dbInstance.exec(`
+      DROP TABLE IF EXISTS telemetry_events;
+      DROP TABLE IF EXISTS responses;
+    `);
+  }
+
+  // Schema creation matching user specification
   dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS surveys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,13 +42,11 @@ function initDatabase(customPath) {
     CREATE TABLE IF NOT EXISTS responses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
-      session_id TEXT UNIQUE NOT NULL,
-      participant_name TEXT DEFAULT 'Аноним',
-      answers TEXT NOT NULL DEFAULT '{}',
+      session_uuid TEXT UNIQUE NOT NULL,
+      current_step INTEGER NOT NULL DEFAULT 1,
       progress INTEGER NOT NULL DEFAULT 0,
-      last_changed_field TEXT DEFAULT NULL,
-      change_count INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'in_progress',
+      answers TEXT NOT NULL DEFAULT '{}',
       started_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       submitted_at TEXT DEFAULT NULL
@@ -47,7 +54,7 @@ function initDatabase(customPath) {
 
     CREATE TABLE IF NOT EXISTS telemetry_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES responses(session_id) ON DELETE CASCADE,
+      session_uuid TEXT NOT NULL REFERENCES responses(session_uuid) ON DELETE CASCADE,
       field_id TEXT DEFAULT NULL,
       field_value TEXT DEFAULT NULL,
       event_type TEXT NOT NULL,
@@ -57,8 +64,8 @@ function initDatabase(customPath) {
 
     CREATE INDEX IF NOT EXISTS idx_surveys_slug ON surveys(slug);
     CREATE INDEX IF NOT EXISTS idx_responses_survey_id ON responses(survey_id);
-    CREATE INDEX IF NOT EXISTS idx_responses_session_id ON responses(session_id);
-    CREATE INDEX IF NOT EXISTS idx_telemetry_session_id ON telemetry_events(session_id);
+    CREATE INDEX IF NOT EXISTS idx_responses_session_uuid ON responses(session_uuid);
+    CREATE INDEX IF NOT EXISTS idx_telemetry_session_uuid ON telemetry_events(session_uuid);
   `);
 
   return dbInstance;

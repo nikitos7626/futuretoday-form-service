@@ -10,7 +10,7 @@ describe('Survey Feedback Service API Tests', () => {
   let app;
   let server;
   let baseUrl;
-  let testSlug = 'product-feedback-2026';
+  let testSlug = 'frontend-intern';
 
   before(async () => {
     if (fs.existsSync(testDbPath)) {
@@ -44,15 +44,37 @@ describe('Survey Feedback Service API Tests', () => {
     }
   });
 
+  test('Database tables match exact specified schema', () => {
+    const { getDatabase } = require('../src/db');
+    const db = getDatabase();
+
+    const surveysCols = db.pragma("table_info(surveys)").map(c => c.name);
+    assert.deepEqual(surveysCols, ['id', 'slug', 'title', 'description', 'questions', 'created_at']);
+
+    const responsesCols = db.pragma("table_info(responses)").map(c => c.name);
+    assert.deepEqual(responsesCols, [
+      'id',
+      'survey_id',
+      'session_uuid',
+      'current_step',
+      'progress',
+      'status',
+      'answers',
+      'started_at',
+      'updated_at',
+      'submitted_at'
+    ]);
+  });
+
   test('POST /api/surveys creates a new survey with custom slug and questions', async () => {
     const payload = {
-      title: 'Опрос удовлетворенности продуктом',
-      description: 'Пожалуйста, поделитесь вашим мнением',
+      title: 'Анкета стажера Frontend',
+      description: 'Описание для соискателя позиции Frontend Intern',
       slug: testSlug,
       questions: [
-        { id: 'q1', label: 'Ваше имя', type: 'text', required: true },
-        { id: 'q2', label: 'Оцените удобство сервиса от 1 до 5', type: 'rating', min: 1, max: 5, required: true },
-        { id: 'q3', label: 'Что нам улучшить?', type: 'textarea', required: false }
+        { id: 'q1', title: 'ФИО', type: 'text', required: true },
+        { id: 'q2', title: 'Опыт в стеке от 1 до 5', type: 'rating', min: 1, max: 5, required: true },
+        { id: 'q3', title: 'Стек технологий', type: 'multiple', options: ['React', 'Node'], required: false }
       ]
     };
 
@@ -68,6 +90,7 @@ describe('Survey Feedback Service API Tests', () => {
     assert.equal(data.survey.slug, testSlug);
     assert.equal(data.survey.title, payload.title);
     assert.equal(data.survey.questions.length, 3);
+    assert.equal(data.survey.questions[0].title, 'ФИО');
     assert.match(data.survey.url, new RegExp(`/s/${testSlug}`));
   });
 
@@ -77,33 +100,35 @@ describe('Survey Feedback Service API Tests', () => {
     const data = await res.json();
     assert.equal(data.survey.slug, testSlug);
     assert.equal(data.survey.questions.length, 3);
+    assert.equal(data.survey.questions[0].title, 'ФИО');
   });
 
-  test('POST /api/surveys/:slug/session initializes a participant card/session', async () => {
+  test('POST /api/surveys/:slug/session initializes a candidate session with session_uuid and current_step', async () => {
     const res = await fetch(`${baseUrl}/api/surveys/${testSlug}/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sessionId: 'session-user-123',
-        participantName: 'Алексей'
+        sessionUuid: 'candidate-uuid-12345',
+        currentStep: 1
       })
     });
 
     assert.equal(res.status, 200);
     const data = await res.json();
     assert.equal(data.success, true);
-    assert.equal(data.session.session_id, 'session-user-123');
-    assert.equal(data.session.participant_name, 'Алексей');
+    assert.equal(data.session.session_uuid, 'candidate-uuid-12345');
+    assert.equal(data.session.current_step, 1);
     assert.equal(data.session.status, 'in_progress');
   });
 
-  test('POST /api/surveys/:slug/telemetry saves current progress after each change', async () => {
-    // Participant changes question 1
+  test('POST /api/surveys/:slug/telemetry saves current_step, progress and answers after each change', async () => {
+    // Step 1: answer question 1
     const telemetryPayload1 = {
-      sessionId: 'session-user-123',
+      sessionUuid: 'candidate-uuid-12345',
+      currentStep: 1,
       fieldId: 'q1',
-      value: 'Алексей Смирнов',
-      answers: { q1: 'Алексей Смирнов' },
+      value: 'Иван',
+      answers: { q1: 'Иван' },
       progress: 33,
       eventType: 'field_change'
     };
@@ -117,16 +142,18 @@ describe('Survey Feedback Service API Tests', () => {
     assert.equal(res1.status, 200);
     const data1 = await res1.json();
     assert.equal(data1.success, true);
-    assert.equal(data1.card.answers.q1, 'Алексей Смирнов');
-    assert.equal(data1.card.change_count, 1);
-    assert.equal(data1.card.last_changed_field, 'q1');
+    assert.equal(data1.card.session_uuid, 'candidate-uuid-12345');
+    assert.equal(data1.card.current_step, 1);
+    assert.equal(data1.card.answers.q1, 'Иван');
+    assert.equal(data1.card.progress, 33);
 
-    // Participant changes question 2
+    // Step 2: answer question 2
     const telemetryPayload2 = {
-      sessionId: 'session-user-123',
+      sessionUuid: 'candidate-uuid-12345',
+      currentStep: 2,
       fieldId: 'q2',
       value: 5,
-      answers: { q1: 'Алексей Смирнов', q2: 5 },
+      answers: { q1: 'Иван', q2: 5 },
       progress: 67,
       eventType: 'field_change'
     };
@@ -139,30 +166,31 @@ describe('Survey Feedback Service API Tests', () => {
 
     assert.equal(res2.status, 200);
     const data2 = await res2.json();
+    assert.equal(data2.card.session_uuid, 'candidate-uuid-12345');
+    assert.equal(data2.card.current_step, 2);
     assert.equal(data2.card.answers.q2, 5);
-    assert.equal(data2.card.change_count, 2);
     assert.equal(data2.card.progress, 67);
   });
 
-  test('GET /api/surveys/:slug/telemetry/:sessionId polls the live state of a card', async () => {
-    const res = await fetch(`${baseUrl}/api/surveys/${testSlug}/telemetry/session-user-123`);
+  test('GET /api/surveys/:slug/telemetry/:sessionUuid polls the live state of a candidate card', async () => {
+    const res = await fetch(`${baseUrl}/api/surveys/${testSlug}/telemetry/candidate-uuid-12345`);
     assert.equal(res.status, 200);
     const data = await res.json();
-    assert.equal(data.session_id, 'session-user-123');
-    assert.equal(data.answers.q1, 'Алексей Смирнов');
+    assert.equal(data.session_uuid, 'candidate-uuid-12345');
+    assert.equal(data.current_step, 2);
+    assert.equal(data.answers.q1, 'Иван');
     assert.equal(data.answers.q2, 5);
-    assert.equal(data.change_count, 2);
     assert.equal(data.status, 'in_progress');
   });
 
-  test('GET /api/surveys/:slug/responses returns all response cards with telemetry for admin', async () => {
+  test('GET /api/surveys/:slug/responses returns all response cards with session_uuid and current_step for admin', async () => {
     const res = await fetch(`${baseUrl}/api/surveys/${testSlug}/responses`);
     assert.equal(res.status, 200);
     const data = await res.json();
     assert.equal(Array.isArray(data.responses), true);
     assert.equal(data.responses.length, 1);
-    assert.equal(data.responses[0].session_id, 'session-user-123');
-    assert.equal(data.responses[0].change_count, 2);
+    assert.equal(data.responses[0].session_uuid, 'candidate-uuid-12345');
+    assert.equal(data.responses[0].current_step, 2);
     assert.ok(data.responses[0].telemetry_events.length >= 2);
   });
 
@@ -173,7 +201,7 @@ describe('Survey Feedback Service API Tests', () => {
       body: JSON.stringify({
         title: 'Дубликат',
         slug: testSlug,
-        questions: [{ id: 'q1', label: 'Тест', type: 'text' }]
+        questions: [{ id: 'q1', title: 'Тест', type: 'text' }]
       })
     });
     assert.equal(res.status, 400);
@@ -200,16 +228,16 @@ describe('Survey Feedback Service API Tests', () => {
     assert.match(html, /survey\.js/);
   });
 
-  test('POST /api/surveys/:slug/submit finalizes the submission', async () => {
+  test('POST /api/surveys/:slug/submit finalizes candidate submission', async () => {
     const res = await fetch(`${baseUrl}/api/surveys/${testSlug}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sessionId: 'session-user-123',
+        sessionUuid: 'candidate-uuid-12345',
         answers: {
-          q1: 'Алексей Смирнов',
+          q1: 'Иван',
           q2: 5,
-          q3: 'Всё отлично, спасибо!'
+          q3: ['React', 'Node']
         }
       })
     });
@@ -218,7 +246,9 @@ describe('Survey Feedback Service API Tests', () => {
     const data = await res.json();
     assert.equal(data.success, true);
     assert.equal(data.response.status, 'submitted');
+    assert.equal(data.response.session_uuid, 'candidate-uuid-12345');
     assert.equal(data.response.progress, 100);
+    assert.deepEqual(data.response.answers.q3, ['React', 'Node']);
     assert.ok(data.response.submitted_at);
   });
 });

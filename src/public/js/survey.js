@@ -9,7 +9,6 @@
   const surveyContent = document.getElementById('surveyContent');
   const completedScreen = document.getElementById('completedScreen');
   const questionsFormList = document.getElementById('questionsFormList');
-  const participantNameInput = document.getElementById('participantName');
   const progressBar = document.getElementById('progressBar');
   const progressText = document.getElementById('progressText');
   const saveStatus = document.getElementById('saveStatus');
@@ -18,46 +17,56 @@
   const btnSubmit = document.getElementById('btnSubmit');
 
   if (!slug) {
-    showError('Некорректная ссылка на опрос');
+    showError('Некорректная ссылка на анкету');
     return;
   }
 
   let surveyData = null;
-  let sessionId = localStorage.getItem(`survey_sess_${slug}`);
+  let sessionUuid = localStorage.getItem(`survey_session_uuid_${slug}`);
   let currentAnswers = {};
+  let currentStep = 1;
   let debounceTimer = null;
+
+  function generateUUID() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
 
   try {
     // 1. Fetch survey details
     const res = await fetch(`/api/surveys/${slug}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Опрос не найден');
+      throw new Error(err.error || 'Анкета не найдена');
     }
     const data = await res.json();
     surveyData = data.survey;
 
-    document.title = `${surveyData.title} | Опрос`;
+    document.title = `${surveyData.title} | Анкета`;
     document.getElementById('surveyTitle').textContent = surveyData.title;
     document.getElementById('surveyDesc').textContent = surveyData.description || '';
 
-    // 2. Initialize or recover session
-    if (!sessionId) {
-      sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-      localStorage.setItem(`survey_sess_${slug}`, sessionId);
+    // 2. Initialize or recover session UUID from localStorage
+    if (!sessionUuid) {
+      sessionUuid = generateUUID();
+      localStorage.setItem(`survey_session_uuid_${slug}`, sessionUuid);
     }
 
     const sessionRes = await fetch(`/api/surveys/${slug}/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId })
+      body: JSON.stringify({ sessionUuid, currentStep })
     });
     const sessionData = await sessionRes.json();
     if (sessionData.session) {
       currentAnswers = sessionData.session.answers || {};
-      if (sessionData.session.participant_name && sessionData.session.participant_name !== 'Аноним') {
-        participantNameInput.value = sessionData.session.participant_name;
-      }
+      currentStep = sessionData.session.current_step || 1;
       if (sessionData.session.status === 'submitted') {
         showCompleted(sessionData.session);
         return;
@@ -86,7 +95,7 @@
     loadingState.style.display = 'none';
     surveyContent.style.display = 'none';
     completedScreen.style.display = 'block';
-    document.getElementById('summarySessionId').textContent = session.session_id;
+    document.getElementById('summarySessionId').textContent = session.session_uuid || session.session_id;
     document.getElementById('summarySubmitTime').textContent = new Date(session.submitted_at || Date.now()).toLocaleString();
   }
 
@@ -94,6 +103,7 @@
     questionsFormList.innerHTML = '';
 
     questions.forEach((q, index) => {
+      const stepNumber = index + 1;
       const panel = document.createElement('div');
       panel.className = 'panel ticks';
       panel.id = `card_${q.id}`;
@@ -107,7 +117,8 @@
             <textarea 
               name="${q.id}" 
               placeholder="Введите ваш ответ…"
-              oninput="handleFieldChange('${q.id}', this.value)"
+              onfocus="handleStepFocus(${stepNumber})"
+              oninput="handleFieldChange('${q.id}', this.value, false, ${stepNumber})"
             >${escapeHtml(existingVal || '')}</textarea>
           `;
           break;
@@ -122,7 +133,7 @@
               <button 
                 type="button" 
                 class="rating-btn ${isActive ? 'active' : ''}" 
-                onclick="handleRatingSelect('${q.id}', ${i}, this)"
+                onclick="handleRatingSelect('${q.id}', ${i}, this, ${stepNumber})"
               >${i}</button>
             `;
           }
@@ -136,7 +147,8 @@
               name="${q.id}" 
               value="${existingVal !== undefined ? existingVal : ''}"
               placeholder="0"
-              oninput="handleFieldChange('${q.id}', this.value)"
+              onfocus="handleStepFocus(${stepNumber})"
+              oninput="handleFieldChange('${q.id}', this.value, false, ${stepNumber})"
             >
           `;
           break;
@@ -150,7 +162,8 @@
                 name="${q.id}" 
                 value="${escapeHtml(opt)}" 
                 ${existingVal === opt ? 'checked' : ''}
-                onchange="handleFieldChange('${q.id}', this.value, true)"
+                onfocus="handleStepFocus(${stepNumber})"
+                onchange="handleFieldChange('${q.id}', this.value, true, ${stepNumber})"
               >
               <span>${escapeHtml(opt)}</span>
             </label>
@@ -167,7 +180,8 @@
                 name="${q.id}" 
                 value="${escapeHtml(opt)}" 
                 ${selectedList.includes(opt) ? 'checked' : ''}
-                onchange="handleMultiSelectChange('${q.id}')"
+                onfocus="handleStepFocus(${stepNumber})"
+                onchange="handleMultiSelectChange('${q.id}', ${stepNumber})"
               >
               <span>${escapeHtml(opt)}</span>
             </label>
@@ -182,7 +196,8 @@
               name="${q.id}" 
               value="${escapeHtml(existingVal || '')}"
               placeholder="Ваш ответ…"
-              oninput="handleFieldChange('${q.id}', this.value)"
+              onfocus="handleStepFocus(${stepNumber})"
+              oninput="handleFieldChange('${q.id}', this.value, false, ${stepNumber})"
             >
           `;
           break;
@@ -191,7 +206,7 @@
       panel.innerHTML = `
         <div class="form-group" style="margin-bottom: 0;">
           <label>
-            ${index + 1}. ${escapeHtml(q.label)}
+            ${stepNumber}. ${escapeHtml(q.title || q.label)}
             ${q.required ? '<span class="required">*</span>' : ''}
           </label>
           ${inputHtml}
@@ -202,41 +217,46 @@
     });
   }
 
-  // Handle Participant Name Change
-  participantNameInput.addEventListener('input', (e) => {
-    sendTelemetry('participant_name', e.target.value, false);
-  });
+  window.handleStepFocus = function(stepNumber) {
+    if (stepNumber && currentStep !== stepNumber) {
+      currentStep = stepNumber;
+      sendTelemetry(null, undefined, false, stepNumber);
+    }
+  };
 
   // Handle Rating Button Click
-  window.handleRatingSelect = function(fieldId, value, buttonEl) {
+  window.handleRatingSelect = function(fieldId, value, buttonEl, stepNumber) {
     const group = document.getElementById(`rating_group_${fieldId}`);
     if (group) {
       group.querySelectorAll('.rating-btn').forEach(b => b.classList.remove('active'));
       buttonEl.classList.add('active');
     }
     currentAnswers[fieldId] = value;
-    sendTelemetry(fieldId, value, true);
+    currentStep = stepNumber || currentStep;
+    sendTelemetry(fieldId, value, true, currentStep);
     updateProgressUI();
   };
 
   // Handle Multi-Select (Checkbox) Change
-  window.handleMultiSelectChange = function(fieldId) {
+  window.handleMultiSelectChange = function(fieldId, stepNumber) {
     const checkboxes = document.querySelectorAll(`input[name="${fieldId}"]:checked`);
     const values = Array.from(checkboxes).map(c => c.value);
     currentAnswers[fieldId] = values;
-    sendTelemetry(fieldId, values, true);
+    currentStep = stepNumber || currentStep;
+    sendTelemetry(fieldId, values, true, currentStep);
     updateProgressUI();
   };
 
   // Handle General Field Changes
-  window.handleFieldChange = function(fieldId, value, immediate = false) {
+  window.handleFieldChange = function(fieldId, value, immediate = false, stepNumber = 1) {
     currentAnswers[fieldId] = value;
+    currentStep = stepNumber || currentStep;
     updateProgressUI();
-    sendTelemetry(fieldId, value, immediate);
+    sendTelemetry(fieldId, value, immediate, currentStep);
   };
 
   // Telemetry Send Function with Debounce
-  function sendTelemetry(fieldId, value, immediate = false) {
+  function sendTelemetry(fieldId, value, immediate = false, stepNumber = 1) {
     setSavingStatus(true);
 
     if (debounceTimer) {
@@ -244,7 +264,8 @@
     }
 
     const payload = {
-      sessionId,
+      sessionUuid,
+      currentStep: stepNumber || currentStep,
       fieldId,
       value,
       answers: currentAnswers,
@@ -252,10 +273,6 @@
       eventType: 'field_change',
       clientTime: new Date().toISOString()
     };
-
-    if (fieldId === 'participant_name') {
-      payload.participantName = value;
-    }
 
     const dispatch = async () => {
       try {
@@ -331,7 +348,7 @@
             card.style.borderColor = 'var(--color-danger)';
             setTimeout(() => { card.style.borderColor = 'var(--color-rule)'; }, 2000);
           }
-          alert(`Пожалуйста, ответьте на обязательный вопрос: "${q.label}"`);
+          alert(`Пожалуйста, ответьте на обязательный вопрос: "${q.title || q.label}"`);
           return;
         }
       }
@@ -345,7 +362,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionId,
+          sessionUuid,
           answers: currentAnswers
         })
       });

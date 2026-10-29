@@ -61,7 +61,7 @@ function renderQuestions() {
       <div class="question-row">
         <div class="form-group" style="margin-bottom: 8px;">
           <label>Текст вопроса <span class="required">*</span></label>
-          <input type="text" value="${escapeHtml(q.label)}" oninput="updateQuestion(${index}, 'label', this.value)" placeholder="Например: Как вы оцениваете доклад?" required>
+          <input type="text" value="${escapeHtml(q.title || q.label)}" oninput="updateQuestion(${index}, 'title', this.value)" placeholder="Например: ФИО или стек технологий" required>
         </div>
         <div class="form-group" style="margin-bottom: 8px;">
           <label>Тип ответа</label>
@@ -78,7 +78,7 @@ function renderQuestions() {
       ${(q.type === 'single' || q.type === 'multiple') ? `
         <div class="form-group" style="margin-top: 8px;">
           <label>Варианты ответа (через запятую)</label>
-          <input type="text" value="${escapeHtml((q.options || []).join(', '))}" oninput="updateQuestionOptions(${index}, this.value)" placeholder="Вариант 1, Вариант 2, Вариант 3">
+          <input type="text" value="${escapeHtml((q.options || []).join(', '))}" oninput="updateQuestionOptions(${index}, this.value)" placeholder="React, Node, TypeScript">
         </div>
       ` : ''}
       <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
@@ -92,10 +92,11 @@ function renderQuestions() {
   });
 }
 
-function addQuestion(defaultType = 'text', defaultLabel = '') {
+function addQuestion(defaultType = 'text', defaultTitle = '') {
   questions.push({
-    id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    label: defaultLabel || `Вопрос ${questions.length + 1}`,
+    id: `q${questions.length + 1}`,
+    title: defaultTitle || `Вопрос ${questions.length + 1}`,
+    label: defaultTitle || `Вопрос ${questions.length + 1}`,
     type: defaultType,
     required: true,
     options: defaultType === 'single' || defaultType === 'multiple' ? ['Вариант A', 'Вариант B'] : []
@@ -110,6 +111,9 @@ window.removeQuestion = function(index) {
 
 window.updateQuestion = function(index, field, value) {
   questions[index][field] = value;
+  if (field === 'title') {
+    questions[index].label = value;
+  }
   if (field === 'type' && (value === 'single' || value === 'multiple') && (!questions[index].options || questions[index].options.length === 0)) {
     questions[index].options = ['Вариант 1', 'Вариант 2'];
     renderQuestions();
@@ -127,9 +131,9 @@ document.getElementById('btnAddQuestion').addEventListener('click', () => {
 });
 
 // Default starter questions
-addQuestion('text', 'Ваше имя или никнейм');
-addQuestion('rating', 'Оцените качество материалов (1-5)');
-addQuestion('textarea', 'Ваши пожелания и предложения');
+addQuestion('text', 'ФИО');
+addQuestion('rating', 'Опыт работы (1-5)');
+addQuestion('textarea', 'Расскажите о ваших проектах');
 
 // Form submission to create survey
 document.getElementById('createSurveyForm').addEventListener('submit', async (e) => {
@@ -139,7 +143,7 @@ document.getElementById('createSurveyForm').addEventListener('submit', async (e)
   let slug = surveySlugInput.value.trim();
 
   if (questions.length === 0) {
-    alert('Пожалуйста, добавьте хотя бы один вопрос в опрос.');
+    alert('Пожалуйста, добавьте хотя бы один вопрос в анкету.');
     return;
   }
 
@@ -161,10 +165,10 @@ document.getElementById('createSurveyForm').addEventListener('submit', async (e)
 
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'Ошибка при создании опроса');
+      throw new Error(data.error || 'Ошибка при создании анкеты');
     }
 
-    alert(`Опрос успешно создан!\nСсылка для участников:\n${data.survey.url}`);
+    alert(`Анкета успешно создана!\nСсылка для соискателей:\n${data.survey.url}`);
     
     // Clear inputs and regenerate slug
     document.getElementById('surveyTitle').value = '';
@@ -193,7 +197,7 @@ async function loadSurveys() {
       surveysTableBody.innerHTML = `
         <tr>
           <td colspan="5" style="text-align: center; color: var(--color-muted); padding: 24px;">
-            Опросы еще не созданы. Создайте первый опрос в форме выше.
+            Анкеты еще не созданы. Создайте первую анкету в форме выше.
           </td>
         </tr>
       `;
@@ -252,7 +256,7 @@ window.copyLink = function(url) {
 };
 
 window.deleteSurvey = async function(slug) {
-  if (!confirm(`Удалить опрос "${slug}" и все связанные с ним ответы?`)) return;
+  if (!confirm(`Удалить анкету "${slug}" и все связанные с ней отклики?`)) return;
   try {
     const res = await fetch(`/api/surveys/${slug}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Ошибка удаления');
@@ -337,7 +341,7 @@ function renderTelemetryCards(responses) {
   if (total === 0) {
     cardsContainer.innerHTML = `
       <div style="grid-column: 1 / -1; padding: 32px; text-align: center; color: var(--color-muted); background: var(--color-paper-2); border-radius: var(--radius-card); border: 1px dashed var(--color-rule-2);">
-        Пока нет активных участников. Откройте ссылку на опрос в другой вкладке и начните заполнять поля — телеметрия отобразит изменения здесь в реальном времени.
+        Пока нет активных кандидатов. Откройте ссылку на анкету в другой вкладке и начните заполнять поля — телеметрия отобразит изменения здесь в реальном времени.
       </div>
     `;
     return;
@@ -347,19 +351,21 @@ function renderTelemetryCards(responses) {
     const answers = r.answers || {};
     const answerEntries = Object.entries(answers);
     const lastUpdateFormatted = new Date(r.updated_at).toLocaleTimeString();
+    const candidateName = answers.q1 ? String(answers.q1) : 'Соискатель';
+    const uuidStr = r.session_uuid || r.session_id || '';
     
     return `
       <div class="respondent-card" style="border-left: 3px solid ${r.status === 'submitted' ? 'var(--color-accent)' : 'var(--color-warning)'}">
         <div class="respondent-header">
-          <div class="respondent-name">${escapeHtml(r.participant_name || 'Аноним')}</div>
+          <div class="respondent-name">${escapeHtml(candidateName)}</div>
           <span class="badge ${r.status === 'submitted' ? 'badge-success' : 'badge-warning'}">
-            ${r.status === 'submitted' ? 'Отправлен' : 'В процессе'}
+            ${r.status === 'submitted' ? 'Отправлен' : (r.status === 'abandoned' ? 'Покинут' : 'В процессе')}
           </span>
         </div>
 
         <div class="respondent-meta">
-          ID: <code>${escapeHtml(r.session_id.slice(0, 14))}…</code> · Изменений: <strong class="num">${r.change_count}</strong><br>
-          Активность: <strong class="num">${lastUpdateFormatted}</strong>
+          UUID: <code>${escapeHtml(uuidStr.slice(0, 18))}…</code><br>
+          Текущий вопрос: <strong class="num">${r.current_step || 1}</strong> · Активность: <strong class="num">${lastUpdateFormatted}</strong>
         </div>
 
         <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
@@ -372,7 +378,7 @@ function renderTelemetryCards(responses) {
 
         <div class="answers-summary">
           <div style="font-weight: 400; font-size: 11px; margin-bottom: 6px; color: var(--color-muted);">
-            Текущие ответы (SQLite):
+            Ответы кандидата (SQLite):
           </div>
           ${answerEntries.length === 0 ? `
             <div style="color: var(--color-muted); font-style: italic;">Пока нет ответов</div>

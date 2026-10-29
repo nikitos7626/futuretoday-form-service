@@ -97,34 +97,35 @@ function createApp(surveyServiceInstance) {
     }
   });
 
-  // Initialize or resume respondent session
+  // Initialize or resume candidate session
   app.post('/api/surveys/:slug/session', (req, res) => {
     try {
-      const { sessionId, participantName } = req.body || {};
-      const session = service.getOrCreateSession(req.params.slug, { sessionId, participantName });
+      const { sessionUuid, sessionId, currentStep } = req.body || {};
+      const session = service.getOrCreateSession(req.params.slug, { sessionUuid, sessionId, currentStep });
       res.json({ success: true, session });
     } catch (err) {
       res.status(400).json({ success: false, error: err.message });
     }
   });
 
-  // Telemetry endpoint - saves current answers and status after each field change
+  // Telemetry endpoint - saves current answers, current_step and progress after each change
   app.post('/api/surveys/:slug/telemetry', (req, res) => {
     try {
-      const { sessionId, fieldId, value, answers, progress, eventType, clientTime, participantName } = req.body;
-      if (!sessionId) {
-        return res.status(400).json({ success: false, error: 'sessionId обязателен' });
+      const { sessionUuid, sessionId, currentStep, fieldId, value, answers, progress, eventType, clientTime } = req.body;
+      const targetUuid = sessionUuid || sessionId;
+      if (!targetUuid) {
+        return res.status(400).json({ success: false, error: 'session_uuid обязателен' });
       }
 
       const card = service.recordTelemetry(req.params.slug, {
-        sessionId,
+        sessionUuid: targetUuid,
+        currentStep,
         fieldId,
         value,
         answers,
         progress,
         eventType,
-        clientTime,
-        participantName
+        clientTime
       });
 
       res.json({ success: true, card });
@@ -134,9 +135,9 @@ function createApp(surveyServiceInstance) {
   });
 
   // Telemetry polling for a single card/session
-  app.get('/api/surveys/:slug/telemetry/:sessionId', (req, res) => {
+  app.get('/api/surveys/:slug/telemetry/:sessionUuid', (req, res) => {
     try {
-      const card = service.getResponseSession(req.params.slug, req.params.sessionId);
+      const card = service.getResponseSession(req.params.slug, req.params.sessionUuid);
       if (!card) {
         return res.status(404).json({ success: false, error: 'Карточка сессии не найдена' });
       }
@@ -159,12 +160,13 @@ function createApp(surveyServiceInstance) {
   // Submit survey
   app.post('/api/surveys/:slug/submit', (req, res) => {
     try {
-      const { sessionId, answers } = req.body;
-      if (!sessionId) {
-        return res.status(400).json({ success: false, error: 'sessionId обязателен' });
+      const { sessionUuid, sessionId, answers } = req.body;
+      const targetUuid = sessionUuid || sessionId;
+      if (!targetUuid) {
+        return res.status(400).json({ success: false, error: 'session_uuid обязателен' });
       }
 
-      const response = service.submitSurvey(req.params.slug, { sessionId, answers });
+      const response = service.submitSurvey(req.params.slug, { sessionUuid: targetUuid, answers });
       res.json({ success: true, response });
     } catch (err) {
       res.status(400).json({ success: false, error: err.message });

@@ -18,7 +18,6 @@ function normalizeSlug(slug) {
 
 function calculateProgress(questions, answers) {
   if (!Array.isArray(questions) || questions.length === 0) return 0;
-  const answerKeys = Object.keys(answers || {});
   let answeredCount = 0;
   for (const q of questions) {
     const val = answers[q.id];
@@ -42,10 +41,10 @@ class SurveyService {
 
   createSurvey({ title, description = '', slug, questions = [] }) {
     if (!title || typeof title !== 'string' || !title.trim()) {
-      throw new Error('Название опроса обязательно');
+      throw new Error('Название анкеты обязательно');
     }
     if (!Array.isArray(questions) || questions.length === 0) {
-      throw new Error('Опрос должен содержать хотя бы один вопрос');
+      throw new Error('Анкета должна содержать хотя бы один вопрос');
     }
 
     const cleanSlug = normalizeSlug(slug);
@@ -54,10 +53,10 @@ class SurveyService {
       throw new Error(`Ссылка со slug "${cleanSlug}" уже существует. Пожалуйста, выберите другой slug.`);
     }
 
-    // Assign IDs to questions if missing
+    // Format questions array: [{ id: "q1", title: "ФИО", type: "text" }, ...]
     const formattedQuestions = questions.map((q, idx) => ({
-      id: q.id || `q_${idx + 1}_${crypto.randomBytes(3).toString('hex')}`,
-      label: q.label || `Вопрос ${idx + 1}`,
+      id: q.id || `q_${idx + 1}`,
+      title: q.title || q.label || `Вопрос ${idx + 1}`,
       type: q.type || 'text', // text, textarea, number, rating, single, multiple
       options: Array.isArray(q.options) ? q.options : [],
       required: Boolean(q.required),
@@ -137,14 +136,14 @@ class SurveyService {
     return true;
   }
 
-  getOrCreateSession(slug, { sessionId, participantName = 'Аноним' }) {
+  getOrCreateSession(slug, { sessionUuid, sessionId, currentStep = 1 }) {
     const survey = this.getSurveyBySlug(slug);
     if (!survey) {
       throw new Error(`Опрос "${slug}" не найден`);
     }
 
-    const cleanSessionId = sessionId || `sess_${crypto.randomUUID()}`;
-    const existing = this.db.prepare('SELECT * FROM responses WHERE session_id = ?').get(cleanSessionId);
+    const cleanUuid = sessionUuid || sessionId || crypto.randomUUID();
+    const existing = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
 
     if (existing) {
       return {
@@ -156,40 +155,43 @@ class SurveyService {
     const now = new Date().toISOString();
     const insert = this.db.prepare(`
       INSERT INTO responses (
-        survey_id, session_id, participant_name, answers, progress,
-        change_count, status, started_at, updated_at
-      ) VALUES (?, ?, ?, ?, 0, 0, 'in_progress', ?, ?)
+        survey_id, session_uuid, current_step, progress, status,
+        answers, started_at, updated_at
+      ) VALUES (?, ?, ?, 0, 'in_progress', '{}', ?, ?)
     `);
 
-    insert.run(survey.id, cleanSessionId, participantName || 'Аноним', '{}', now, now);
+    insert.run(survey.id, cleanUuid, Number(currentStep) || 1, now, now);
 
     return {
       survey_id: survey.id,
-      session_id: cleanSessionId,
-      participant_name: participantName || 'Аноним',
-      answers: {},
+      session_uuid: cleanUuid,
+      current_step: Number(currentStep) || 1,
       progress: 0,
-      change_count: 0,
       status: 'in_progress',
+      answers: {},
       started_at: now,
-      updated_at: now
+      updated_at: now,
+      submitted_at: null
     };
   }
 
-  recordTelemetry(slug, { sessionId, fieldId, value, answers = {}, progress, eventType = 'field_change', clientTime, participantName }) {
+  recordTelemetry(slug, { sessionUuid, sessionId, currentStep, fieldId, value, answers = {}, progress, eventType = 'field_change', clientTime }) {
     const survey = this.getSurveyBySlug(slug);
     if (!survey) {
       throw new Error(`Опрос "${slug}" не найден`);
     }
 
-    let existing = this.db.prepare('SELECT * FROM responses WHERE session_id = ?').get(sessionId);
+    const cleanUuid = sessionUuid || sessionId;
+    if (!cleanUuid) {
+      throw new Error('session_uuid обязателен');
+    }
+
+    let existing = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
     const now = new Date().toISOString();
 
-    const resolvedName = participantName || (fieldId === 'participant_name' ? value : null);
-
     if (!existing) {
-      this.getOrCreateSession(slug, { sessionId, participantName: resolvedName });
-      existing = this.db.prepare('SELECT * FROM responses WHERE session_id = ?').get(sessionId);
+      this.getOrCreateSession(slug, { sessionUuid: cleanUuid, currentStep });
+      existing = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
     }
 
     const currentAnswers = {
@@ -197,7 +199,7 @@ class SurveyService {
       ...answers
     };
 
-    if (fieldId && fieldId !== 'participant_name' && value !== undefined) {
+    if (fieldId && value !== undefined) {
       currentAnswers[fieldId] = value;
     }
 
@@ -205,35 +207,34 @@ class SurveyService {
       ? progress
       : calculateProgress(survey.questions, currentAnswers);
 
+    const stepToSet = currentStep !== undefined ? Number(currentStep) : existing.current_step;
+
     const updateResponse = this.db.prepare(`
       UPDATE responses
       SET 
         answers = ?,
-        participant_name = COALESCE(?, participant_name),
+        current_step = ?,
         progress = ?,
-        last_changed_field = ?,
-        change_count = change_count + 1,
         updated_at = ?
-      WHERE session_id = ?
+      WHERE session_uuid = ?
     `);
 
     updateResponse.run(
       JSON.stringify(currentAnswers),
-      resolvedName,
+      stepToSet,
       calculatedProgress,
-      fieldId || existing.last_changed_field,
       now,
-      sessionId
+      cleanUuid
     );
 
     // Save event to telemetry_events log
     const insertEvent = this.db.prepare(`
-      INSERT INTO telemetry_events (session_id, field_id, field_value, event_type, client_time, server_time)
+      INSERT INTO telemetry_events (session_uuid, field_id, field_value, event_type, client_time, server_time)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
 
     insertEvent.run(
-      sessionId,
+      cleanUuid,
       fieldId || null,
       value !== undefined ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : null,
       eventType,
@@ -241,26 +242,26 @@ class SurveyService {
       now
     );
 
-    const updated = this.db.prepare('SELECT * FROM responses WHERE session_id = ?').get(sessionId);
+    const updated = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
     return {
       ...updated,
       answers: JSON.parse(updated.answers)
     };
   }
 
-  getResponseSession(slug, sessionId) {
+  getResponseSession(slug, sessionUuid) {
     const row = this.db.prepare(`
       SELECT r.* 
       FROM responses r
       JOIN surveys s ON s.id = r.survey_id
-      WHERE s.slug = ? AND r.session_id = ?
-    `).get(slug, sessionId);
+      WHERE s.slug = ? AND r.session_uuid = ?
+    `).get(slug, sessionUuid);
 
     if (!row) return null;
 
     const events = this.db.prepare(`
-      SELECT * FROM telemetry_events WHERE session_id = ? ORDER BY id DESC LIMIT 20
-    `).all(sessionId);
+      SELECT * FROM telemetry_events WHERE session_uuid = ? ORDER BY id DESC LIMIT 20
+    `).all(sessionUuid);
 
     return {
       ...row,
@@ -281,8 +282,8 @@ class SurveyService {
 
     return responses.map((r) => {
       const events = this.db.prepare(`
-        SELECT * FROM telemetry_events WHERE session_id = ? ORDER BY id DESC LIMIT 10
-      `).all(r.session_id);
+        SELECT * FROM telemetry_events WHERE session_uuid = ? ORDER BY id DESC LIMIT 10
+      `).all(r.session_uuid);
 
       return {
         ...r,
@@ -292,13 +293,18 @@ class SurveyService {
     });
   }
 
-  submitSurvey(slug, { sessionId, answers = {} }) {
+  submitSurvey(slug, { sessionUuid, sessionId, answers = {} }) {
     const survey = this.getSurveyBySlug(slug);
     if (!survey) {
       throw new Error(`Опрос "${slug}" не найден`);
     }
 
-    const existing = this.db.prepare('SELECT * FROM responses WHERE session_id = ?').get(sessionId);
+    const cleanUuid = sessionUuid || sessionId;
+    if (!cleanUuid) {
+      throw new Error('session_uuid обязателен');
+    }
+
+    const existing = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
     if (!existing) {
       throw new Error('Сессия не найдена');
     }
@@ -313,19 +319,20 @@ class SurveyService {
       UPDATE responses
       SET 
         answers = ?,
+        current_step = ?,
         progress = 100,
         status = 'submitted',
         updated_at = ?,
         submitted_at = ?
-      WHERE session_id = ?
-    `).run(JSON.stringify(currentAnswers), now, now, sessionId);
+      WHERE session_uuid = ?
+    `).run(JSON.stringify(currentAnswers), survey.questions.length, now, now, cleanUuid);
 
     this.db.prepare(`
-      INSERT INTO telemetry_events (session_id, field_id, field_value, event_type, server_time)
+      INSERT INTO telemetry_events (session_uuid, field_id, field_value, event_type, server_time)
       VALUES (?, ?, ?, 'submit', ?)
-    `).run(sessionId, null, 'SUBMITTED', now);
+    `).run(cleanUuid, null, 'SUBMITTED', now);
 
-    const updated = this.db.prepare('SELECT * FROM responses WHERE session_id = ?').get(sessionId);
+    const updated = this.db.prepare('SELECT * FROM responses WHERE session_uuid = ?').get(cleanUuid);
     return {
       ...updated,
       answers: JSON.parse(updated.answers)
