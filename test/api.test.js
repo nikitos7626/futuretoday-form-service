@@ -233,7 +233,29 @@ describe('Survey Feedback Service API Tests', () => {
     assert.match(data.error, /уже существует/i);
   });
 
-  test('PUT /api/surveys/:slug updates an existing survey successfully', async () => {
+  test('PUT and POST /api/surveys/edit/:slug updates an existing survey successfully', async () => {
+    // Test POST /api/surveys/edit/:slug
+    const resPost = await fetch(`${baseUrl}/api/surveys/edit/${testSlug}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Анкета стажера Frontend (Updated via POST edit)',
+        description: 'Обновленное описание вакансии через POST edit',
+        questions: [
+          { id: 'q1', title: 'ФИО', type: 'text', required: true },
+          { id: 'q2', title: 'Опыт в стеке от 1 до 5', type: 'rating', min: 1, max: 5, required: true },
+          { id: 'q3', title: 'Стек технологий', type: 'multiple', options: ['React', 'Node', 'TypeScript', 'Docker'], required: true }
+        ]
+      })
+    });
+
+    assert.equal(resPost.status, 200);
+    const dataPost = await resPost.json();
+    assert.equal(dataPost.success, true);
+    assert.equal(dataPost.survey.title, 'Анкета стажера Frontend (Updated via POST edit)');
+    assert.equal(dataPost.survey.questions[2].options.length, 4);
+
+    // Test PUT /api/surveys/:slug
     const res = await fetch(`${baseUrl}/api/surveys/${testSlug}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

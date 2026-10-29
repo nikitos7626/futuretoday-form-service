@@ -48,10 +48,10 @@ function createApp(surveyServiceInstance) {
     }
   });
 
-  // Update survey
-  app.put('/api/surveys/:slug', (req, res) => {
+  // Handler for survey update/edit
+  const handleUpdateSurvey = (req, res) => {
     try {
-      const { title, description, questions, slug: newSlug } = req.body;
+      const { title, description, questions, slug: newSlug } = req.body || {};
       const updated = service.updateSurvey(req.params.slug, { title, description, questions, newSlug });
       const host = req.get('host');
       const protocol = req.protocol;
@@ -68,7 +68,16 @@ function createApp(surveyServiceInstance) {
       const status = err.statusCode || (err.message.includes('не найден') ? 404 : 400);
       res.status(status).json({ success: false, error: err.message, code: err.code });
     }
-  });
+  };
+
+  // Dedicated endpoints for editing surveys:
+  // /api/surveys/edit/:slug and /api/surveys/:slug/edit and /api/surveys/:slug (POST & PUT)
+  app.post('/api/surveys/edit/:slug', handleUpdateSurvey);
+  app.put('/api/surveys/edit/:slug', handleUpdateSurvey);
+  app.post('/api/surveys/:slug/edit', handleUpdateSurvey);
+  app.put('/api/surveys/:slug/edit', handleUpdateSurvey);
+  app.put('/api/surveys/:slug', handleUpdateSurvey);
+  app.post('/api/surveys/:slug', handleUpdateSurvey);
 
   // List surveys with telemetry summary
   app.get('/api/surveys', (req, res) => {

@@ -175,8 +175,8 @@ document.getElementById('createSurveyForm').addEventListener('submit', async (e)
 
   try {
     const isEdit = Boolean(editingSlug);
-    const url = isEdit ? `/api/surveys/${editingSlug}` : '/api/surveys';
-    const method = isEdit ? 'PUT' : 'POST';
+    const url = isEdit ? `/api/surveys/edit/${encodeURIComponent(editingSlug)}` : '/api/surveys';
+    const method = 'POST';
 
     const res = await fetch(url, {
       method,
