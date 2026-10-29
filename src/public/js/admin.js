@@ -445,33 +445,158 @@ async function pollResponses() {
   }
 }
 
+function hasAnswers(r) {
+  if (!r.answers || typeof r.answers !== 'object') return false;
+  return Object.values(r.answers).some(val => {
+    if (val === undefined || val === null || val === '') return false;
+    if (Array.isArray(val)) return val.length > 0;
+    return true;
+  });
+}
+
+function renderTelemetryCharts(responses, stats) {
+  const container = document.getElementById('telemetryChartsContainer');
+  if (!container) return;
+
+  const total = stats.totalCount;
+  if (total === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const submitted = stats.submittedCount;
+  const inProgress = stats.inProgressActiveCount;
+  const empty = stats.emptyCount;
+
+  const submittedPct = Math.round((submitted / total) * 100);
+  const inProgressPct = Math.round((inProgress / total) * 100);
+  const emptyPct = Math.max(0, 100 - submittedPct - inProgressPct);
+
+  // Progress histogram buckets (0% empty, 1-25%, 26-50%, 51-75%, 76-99%, 100%)
+  const buckets = [
+    { label: '0% (Пустые)', count: responses.filter(r => r.progress === 0 && !hasAnswers(r)).length, color: 'var(--color-rule-2)' },
+    { label: '1–25%', count: responses.filter(r => r.progress > 0 && r.progress <= 25).length, color: 'var(--color-warning)' },
+    { label: '26–50%', count: responses.filter(r => r.progress > 25 && r.progress <= 50).length, color: 'var(--color-warning)' },
+    { label: '51–75%', count: responses.filter(r => r.progress > 50 && r.progress <= 75).length, color: 'var(--color-accent)' },
+    { label: '76–99%', count: responses.filter(r => r.progress > 75 && r.progress < 100).length, color: 'var(--color-accent)' },
+    { label: '100%', count: responses.filter(r => r.progress === 100).length, color: 'var(--color-success)' }
+  ];
+
+  const maxBucketCount = Math.max(1, ...buckets.map(b => b.count));
+
+  container.innerHTML = `
+    <!-- Funnel Status Breakdown -->
+    <div class="chart-box">
+      <div class="chart-header">
+        <span class="chart-title">Воронка активности участников</span>
+        <span class="chart-meta">Всего: <strong class="num">${total}</strong></span>
+      </div>
+      <div class="segmented-bar">
+        ${submitted > 0 ? `<div class="segment segment-submitted" style="flex: ${submitted};" title="Завершено: ${submitted} (${submittedPct}%)"></div>` : ''}
+        ${inProgress > 0 ? `<div class="segment segment-active" style="flex: ${inProgress};" title="Заполняют: ${inProgress} (${inProgressPct}%)"></div>` : ''}
+        ${empty > 0 ? `<div class="segment segment-empty" style="flex: ${empty};" title="Пустые (только открыли): ${empty} (${emptyPct}%)"></div>` : ''}
+      </div>
+      <div class="segmented-legend">
+        <div class="legend-item">
+          <span class="legend-dot dot-submitted"></span>
+          <span>Завершено: <strong class="num">${submitted}</strong> <span class="u">(${submittedPct}%)</span></span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot dot-active"></span>
+          <span>Заполняют ответы: <strong class="num">${inProgress}</strong> <span class="u">(${inProgressPct}%)</span></span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot dot-empty"></span>
+          <span>Пустые (только открыли): <strong class="num">${empty}</strong> <span class="u">(${emptyPct}%)</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Progress Distribution Histogram -->
+    <div class="chart-box">
+      <div class="chart-header">
+        <span class="chart-title">Распределение по проценту прогресса</span>
+        <span class="chart-meta">Сессий: <strong class="num">${total}</strong></span>
+      </div>
+      <div class="histogram-container">
+        ${buckets.map(b => {
+          const heightRatio = b.count / maxBucketCount;
+          return `
+            <div class="histogram-col" title="${b.label}: ${b.count} участников">
+              <span class="histogram-count num">${b.count}</span>
+              <div class="histogram-bar-track">
+                <div class="histogram-fill" style="transform: scaleY(${heightRatio}); background-color: ${b.color};"></div>
+              </div>
+              <span class="histogram-label">${b.label}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
 function renderTelemetryCards(responses, surveyMeta) {
   const total = responses.length;
-  const inProgress = responses.filter(r => r.status === 'in_progress').length;
-  const submitted = responses.filter(r => r.status === 'submitted').length;
 
-  document.getElementById('statTotalCount').textContent = total;
-  document.getElementById('statInProgressCount').textContent = inProgress;
-  document.getElementById('statSubmittedCount').textContent = submitted;
+  // Filter completely empty questionnaires: only show active responses in the cards list
+  const activeResponses = responses.filter(r => (r.progress > 0) || hasAnswers(r));
+  const emptyResponses = responses.filter(r => !((r.progress > 0) || hasAnswers(r)));
 
-  if (total === 0) {
-    cardsContainer.innerHTML = `
-      <div style="grid-column: 1 / -1; padding: 32px; text-align: center; color: var(--color-muted); background: var(--color-paper-2); border-radius: var(--radius-card); border: 1px dashed var(--color-rule-2);">
-        Пока нет активных кандидатов. Откройте ссылку на анкету в другой вкладке и начните заполнять поля — телеметрия отобразит изменения здесь в реальном времени.
-      </div>
-    `;
+  const totalCount = total;
+  const emptyCount = emptyResponses.length;
+  const activeCount = activeResponses.length;
+  const submittedCount = responses.filter(r => r.status === 'submitted').length;
+  const inProgressActiveCount = activeResponses.filter(r => r.status !== 'submitted').length;
+
+  // Update KPI counters
+  const elTotal = document.getElementById('statTotalCount');
+  const elInProgress = document.getElementById('statInProgressCount');
+  const elSubmitted = document.getElementById('statSubmittedCount');
+  const elEmpty = document.getElementById('statEmptyCount');
+  const elActiveCount = document.getElementById('activeCardsCount');
+
+  if (elTotal) elTotal.textContent = totalCount;
+  if (elInProgress) elInProgress.textContent = inProgressActiveCount;
+  if (elSubmitted) elSubmitted.textContent = submittedCount;
+  if (elEmpty) elEmpty.textContent = emptyCount;
+  if (elActiveCount) elActiveCount.textContent = activeCount;
+
+  // Render Graphical Charts including empty sessions
+  renderTelemetryCharts(responses, { totalCount, emptyCount, activeCount, submittedCount, inProgressActiveCount });
+
+  // Remember which cards are currently open/expanded to preserve state during polling
+  const openUuids = new Set(
+    Array.from(cardsContainer.querySelectorAll('details[open]')).map(el => el.getAttribute('data-uuid')).filter(Boolean)
+  );
+
+  if (activeResponses.length === 0) {
+    if (total === 0) {
+      cardsContainer.innerHTML = `
+        <div style="padding: 32px; text-align: center; color: var(--color-muted); background: var(--color-paper-2); border-radius: var(--radius-card); border: 1px dashed var(--color-rule-2);">
+          Пока нет участников. Откройте ссылку на анкету в другой вкладке, чтобы протестировать телеметрию.
+        </div>
+      `;
+    } else {
+      cardsContainer.innerHTML = `
+        <div style="padding: 24px; text-align: center; color: var(--color-muted); background: var(--color-paper-2); border-radius: var(--radius-card); border: 1px dashed var(--color-rule-2);">
+          Все текущие сессии (<strong>${emptyCount}</strong>) пока пустые — кандидаты только открыли ссылку и ещё не ввели ответы. Статистика отражена в графиках выше. Как только кандидат заполнит поле, его анкета появится здесь.
+        </div>
+      `;
+    }
     return;
   }
 
   const surveyQuestions = (surveyMeta?.questions && Array.isArray(surveyMeta.questions)) ? surveyMeta.questions : [];
 
-  cardsContainer.innerHTML = responses.map(r => {
+  cardsContainer.innerHTML = activeResponses.map(r => {
     const answers = r.answers || {};
     const lastUpdateFormatted = new Date(r.updated_at).toLocaleTimeString();
     const uuidStr = r.session_uuid || r.session_id || '';
     const surveySlug = r.survey_slug || surveyMeta?.slug || activeTelemetrySlug || '';
     const surveyTitle = r.survey_title || surveyMeta?.title || surveySlug;
     const surveyUrl = surveyMeta?.url || `/s/${encodeURIComponent(surveySlug)}`;
+    const isOpen = openUuids.has(uuidStr);
 
     // Resolve candidate name dynamically
     let candidateName = 'Соискатель';
@@ -545,54 +670,66 @@ function renderTelemetryCards(responses, surveyMeta) {
       : Object.keys(answers).length;
     
     return `
-      <div class="respondent-card" style="border-left: 3px solid ${r.status === 'submitted' ? 'var(--color-accent)' : 'var(--color-warning)'}">
-        <div class="respondent-header">
-          <div class="respondent-name">${escapeHtml(candidateName)}</div>
-          <span class="badge ${r.status === 'submitted' ? 'badge-success' : 'badge-warning'}">
-            ${r.status === 'submitted' ? 'Отправлен' : (r.status === 'abandoned' ? 'Покинут' : 'В процессе')}
-          </span>
-        </div>
-
-        <div class="respondent-survey-ref">
-          <span class="ref-label">Исходный опрос:</span>
-          <a href="${escapeHtml(surveyUrl)}" target="_blank" rel="noopener noreferrer" class="survey-ref-link" title="Открыть исходный опрос">
-            <span class="survey-ref-title">${escapeHtml(surveyTitle)}</span>
-            <span class="survey-ref-badge">/s/${escapeHtml(surveySlug)}</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <line x1="10" y1="14" x2="21" y2="3"></line>
-            </svg>
-          </a>
-        </div>
-
-        <div class="respondent-meta">
-          UUID: <code>${escapeHtml(uuidStr.slice(0, 18))}…</code><br>
-          Текущий шаг: <strong class="num">${r.current_step || 1}</strong> из <strong class="num">${surveyQuestions.length || '?'}</strong> · Активность: <strong class="num">${lastUpdateFormatted}</strong>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-          <span>Прогресс</span>
-          <span class="num">${r.progress}<span class="u">%</span></span>
-        </div>
-        <div class="progress-bar-container" style="margin-bottom: 12px;">
-          <div class="progress-bar" style="transform: scaleX(${r.progress / 100}); background-color: ${r.status === 'submitted' ? 'var(--color-accent)' : 'var(--color-warning)'}"></div>
-        </div>
-
-        <div class="answers-summary">
-          <div class="answers-summary-title">
-            <span>Вопросы и ответы соискателя:</span>
-            <span class="num">${answeredCount} / ${surveyQuestions.length || Object.keys(answers).length}</span>
+      <details class="respondent-card collapsible" data-uuid="${escapeHtml(uuidStr)}" ${isOpen ? 'open' : ''} style="border-left: 3px solid ${r.status === 'submitted' ? 'var(--color-success)' : 'var(--color-accent)'}">
+        <summary class="respondent-header-summary">
+          <div class="summary-left">
+            <span class="chevron-indicator" aria-hidden="true">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </span>
+            <span class="summary-fio">${escapeHtml(candidateName)}</span>
           </div>
-          ${questionsHtml}
-        </div>
 
-        ${r.telemetry_events && r.telemetry_events.length > 0 ? `
-          <div style="margin-top: 8px; font-size: 11px; color: var(--color-muted);">
-            Событие: <code>${escapeHtml(r.telemetry_events[0].field_id || r.telemetry_events[0].event_type)}</code> (${new Date(r.telemetry_events[0].server_time).toLocaleTimeString()})
+          <div class="summary-middle">
+            <a href="${escapeHtml(surveyUrl)}" target="_blank" rel="noopener noreferrer" class="survey-ref-link" onclick="event.stopPropagation()" title="Открыть исходный опрос">
+              <span class="survey-ref-title">${escapeHtml(surveyTitle)}</span>
+              <span class="survey-ref-badge">/s/${escapeHtml(surveySlug)}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
           </div>
-        ` : ''}
-      </div>
+
+          <div class="summary-right">
+            <span class="summary-progress-badge">
+              <span class="num">${r.progress}<span class="u">%</span></span>
+            </span>
+            <span class="badge ${r.status === 'submitted' ? 'badge-success' : 'badge-warning'}">
+              ${r.status === 'submitted' ? 'Отправлен' : 'В процессе'}
+            </span>
+          </div>
+        </summary>
+
+        <div class="respondent-body">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+            <span>Прогресс</span>
+            <span class="num">${r.progress}<span class="u">%</span></span>
+          </div>
+          <div class="progress-bar-container" style="margin-bottom: 12px;">
+            <div class="progress-bar" style="transform: scaleX(${r.progress / 100}); background-color: ${r.status === 'submitted' ? 'var(--color-success)' : 'var(--color-accent)'}"></div>
+          </div>
+
+          <div class="respondent-meta">
+            UUID: <code>${escapeHtml(uuidStr.slice(0, 18))}…</code><br>
+            Текущий шаг: <strong class="num">${r.current_step || 1}</strong> из <strong class="num">${surveyQuestions.length || '?'}</strong> · Активность: <strong class="num">${lastUpdateFormatted}</strong>
+          </div>
+
+          <div class="answers-summary">
+            <div class="answers-summary-title">
+              <span>Вопросы и ответы соискателя:</span>
+              <span class="num">${answeredCount} / ${surveyQuestions.length || Object.keys(answers).length}</span>
+            </div>
+            ${questionsHtml}
+          </div>
+
+          ${r.telemetry_events && r.telemetry_events.length > 0 ? `
+            <div style="margin-top: 12px; font-size: 11px; color: var(--color-muted);">
+              Событие: <code>${escapeHtml(r.telemetry_events[0].field_id || r.telemetry_events[0].event_type)}</code> (${new Date(r.telemetry_events[0].server_time).toLocaleTimeString()})
+            </div>
+          ` : ''}
+        </div>
+      </details>
     `;
   }).join('');
 }
