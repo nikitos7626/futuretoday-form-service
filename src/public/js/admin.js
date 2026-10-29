@@ -1,4 +1,4 @@
-// Admin Panel Logic
+// Admin Panel Logic (Vantage Theme)
 let activeTelemetrySlug = null;
 let telemetryInterval = null;
 let questions = [];
@@ -12,6 +12,11 @@ const telemetrySurveyTitle = document.getElementById('telemetrySurveyTitle');
 const cardsContainer = document.getElementById('cardsContainer');
 const autoPollToggle = document.getElementById('autoPollToggle');
 const btnPollNow = document.getElementById('btnPollNow');
+
+// SVG Icons
+const ICON_TRASH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
+const ICON_COPY = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+const ICON_EXTERNAL = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`;
 
 // Initialize URL prefix
 if (slugPrefixEl) {
@@ -36,8 +41,8 @@ function renderQuestions() {
   questionsContainer.innerHTML = '';
   if (questions.length === 0) {
     questionsContainer.innerHTML = `
-      <div style="padding: 16px; border: 1px dashed var(--gray-border); border-radius: 8px; text-align: center; color: var(--gray); font-size: 14px;">
-        Вопросы еще не добавлены. Нажмите "+ Добавить вопрос" ниже.
+      <div style="padding: 20px; border: 1px dashed var(--color-rule-2); border-radius: var(--radius-card); text-align: center; color: var(--color-muted); font-size: 14px;">
+        Вопросы еще не добавлены. Нажмите "+ Добавить вопрос" выше.
       </div>
     `;
     return;
@@ -49,7 +54,9 @@ function renderQuestions() {
     item.innerHTML = `
       <div class="question-header">
         <span class="question-number">Вопрос №${index + 1}</span>
-        <button type="button" class="btn btn-danger btn-sm" onclick="removeQuestion(${index})">Удалить</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeQuestion(${index})">
+          ${ICON_TRASH} Удалить
+        </button>
       </div>
       <div class="question-row">
         <div class="form-group" style="margin-bottom: 8px;">
@@ -138,7 +145,7 @@ document.getElementById('createSurveyForm').addEventListener('submit', async (e)
 
   const btn = document.getElementById('btnSubmitSurvey');
   btn.disabled = true;
-  btn.textContent = 'Создание...';
+  btn.textContent = 'Создание…';
 
   try {
     const res = await fetch('/api/surveys', {
@@ -170,7 +177,7 @@ document.getElementById('createSurveyForm').addEventListener('submit', async (e)
     alert(`Ошибка: ${err.message}`);
   } finally {
     btn.disabled = false;
-    btn.textContent = '🚀 Создать опрос и сгенерировать ссылку';
+    btn.textContent = 'Создать опрос и сгенерировать ссылку';
   }
 });
 
@@ -185,8 +192,8 @@ async function loadSurveys() {
     if (surveys.length === 0) {
       surveysTableBody.innerHTML = `
         <tr>
-          <td colspan="5" style="text-align: center; color: var(--gray); padding: 24px;">
-            Опросы еще не созданы. Создайте первый опрос в форме выше!
+          <td colspan="5" style="text-align: center; color: var(--color-muted); padding: 24px;">
+            Опросы еще не созданы. Создайте первый опрос в форме выше.
           </td>
         </tr>
       `;
@@ -196,19 +203,21 @@ async function loadSurveys() {
     surveysTableBody.innerHTML = surveys.map(s => `
       <tr>
         <td>
-          <strong>${escapeHtml(s.title)}</strong>
-          ${s.description ? `<div style="font-size: 12px; color: var(--gray);">${escapeHtml(s.description)}</div>` : ''}
+          <strong style="color: var(--color-ink);">${escapeHtml(s.title)}</strong>
+          ${s.description ? `<div style="font-size: 12px; color: var(--color-muted);">${escapeHtml(s.description)}</div>` : ''}
         </td>
         <td>
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <code style="background: var(--gray-light); padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(s.url)}</code>
-            <button class="btn btn-secondary btn-sm" onclick="copyLink('${escapeHtml(s.url)}')">📋 Копировать</button>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <code>${escapeHtml(s.url)}</code>
+            <button class="btn btn-secondary btn-sm" onclick="copyLink('${escapeHtml(s.url)}')">
+              ${ICON_COPY} Копировать
+            </button>
           </div>
         </td>
         <td>
-          <div>Всего: <strong>${s.total_responses}</strong></div>
-          <div style="font-size: 12px; color: var(--gray);">
-            🟢 ${s.submitted_count} завершено / 🟡 ${s.in_progress_count} в процессе
+          <div>Всего: <strong class="num">${s.total_responses}</strong></div>
+          <div style="font-size: 12px; color: var(--color-muted);">
+            Завершено: <span class="num">${s.submitted_count}</span> · В процессе: <span class="num">${s.in_progress_count}</span>
           </div>
         </td>
         <td>
@@ -217,17 +226,17 @@ async function loadSurveys() {
           </span>
         </td>
         <td>
-          <div style="display: flex; gap: 6px;">
-            <a href="${s.url}" target="_blank" class="btn btn-secondary btn-sm">🔗 Открыть</a>
-            <button class="btn btn-primary btn-sm" onclick="openTelemetry('${s.slug}', '${escapeHtml(s.title)}')">📡 Телеметрия</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteSurvey('${s.slug}')">🗑️</button>
+          <div style="display: flex; gap: 8px;">
+            <a href="${s.url}" target="_blank" class="btn btn-secondary btn-sm">${ICON_EXTERNAL} Открыть</a>
+            <button class="btn btn-primary btn-sm" onclick="openTelemetry('${s.slug}', '${escapeHtml(s.title)}')">Телеметрия</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSurvey('${s.slug}')" aria-label="Удалить">${ICON_TRASH}</button>
           </div>
         </td>
       </tr>
     `).join('');
   } catch (err) {
     surveysTableBody.innerHTML = `
-      <tr><td colspan="5" style="color: var(--danger); text-align: center;">Ошибка загрузки: ${err.message}</td></tr>
+      <tr><td colspan="5" style="color: var(--color-danger); text-align: center;">Ошибка загрузки: ${err.message}</td></tr>
     `;
   }
 }
@@ -311,7 +320,7 @@ async function pollResponses() {
     console.error('Ошибка телеметрии:', err);
   } finally {
     setTimeout(() => {
-      if (indicator) indicator.style.opacity = '0.5';
+      if (indicator) indicator.style.opacity = '0.4';
     }, 400);
   }
 }
@@ -327,8 +336,8 @@ function renderTelemetryCards(responses) {
 
   if (total === 0) {
     cardsContainer.innerHTML = `
-      <div style="grid-column: 1 / -1; padding: 32px; text-align: center; color: var(--gray); background: white; border-radius: 8px; border: 1px dashed var(--gray-border);">
-        Пока нет активных участников. Откройте ссылку на опрос в другой вкладке и начните заполнять поля — вы увидите изменения здесь в реальном времени!
+      <div style="grid-column: 1 / -1; padding: 32px; text-align: center; color: var(--color-muted); background: var(--color-paper-2); border-radius: var(--radius-card); border: 1px dashed var(--color-rule-2);">
+        Пока нет активных участников. Откройте ссылку на опрос в другой вкладке и начните заполнять поля — телеметрия отобразит изменения здесь в реальном времени.
       </div>
     `;
     return;
@@ -340,33 +349,33 @@ function renderTelemetryCards(responses) {
     const lastUpdateFormatted = new Date(r.updated_at).toLocaleTimeString();
     
     return `
-      <div class="respondent-card" style="border-left: 4px solid ${r.status === 'submitted' ? 'var(--success)' : 'var(--warning)'}">
+      <div class="respondent-card" style="border-left: 3px solid ${r.status === 'submitted' ? 'var(--color-accent)' : 'var(--color-warning)'}">
         <div class="respondent-header">
-          <div class="respondent-name">👤 ${escapeHtml(r.participant_name || 'Аноним')}</div>
+          <div class="respondent-name">${escapeHtml(r.participant_name || 'Аноним')}</div>
           <span class="badge ${r.status === 'submitted' ? 'badge-success' : 'badge-warning'}">
-            ${r.status === 'submitted' ? '✓ Отправлен' : '✎ Заполняет'}
+            ${r.status === 'submitted' ? 'Отправлен' : 'В процессе'}
           </span>
         </div>
 
         <div class="respondent-meta">
-          ID: <code>${escapeHtml(r.session_id.slice(0, 14))}...</code> | Изменений: <strong>${r.change_count}</strong><br>
-          Посл. активность: <strong>${lastUpdateFormatted}</strong>
+          ID: <code>${escapeHtml(r.session_id.slice(0, 14))}…</code> · Изменений: <strong class="num">${r.change_count}</strong><br>
+          Активность: <strong class="num">${lastUpdateFormatted}</strong>
         </div>
 
         <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-          <span>Прогресс:</span>
-          <strong>${r.progress}%</strong>
+          <span>Прогресс</span>
+          <span class="num">${r.progress}<span class="u">%</span></span>
         </div>
-        <div class="progress-bar-container" style="margin-bottom: 12px; height: 6px;">
-          <div class="progress-bar" style="width: ${r.progress}%; background: ${r.status === 'submitted' ? 'var(--success)' : 'var(--primary)'}"></div>
+        <div class="progress-bar-container" style="margin-bottom: 12px;">
+          <div class="progress-bar" style="transform: scaleX(${r.progress / 100}); background-color: ${r.status === 'submitted' ? 'var(--color-accent)' : 'var(--color-warning)'}"></div>
         </div>
 
         <div class="answers-summary">
-          <div style="font-weight: 600; font-size: 11px; margin-bottom: 6px; text-transform: uppercase; color: var(--gray);">
-            Текущие ответы (Live SQLite):
+          <div style="font-weight: 400; font-size: 11px; margin-bottom: 6px; color: var(--color-muted);">
+            Текущие ответы (SQLite):
           </div>
           ${answerEntries.length === 0 ? `
-            <div style="color: var(--gray); font-style: italic;">Пока нет ответов</div>
+            <div style="color: var(--color-muted); font-style: italic;">Пока нет ответов</div>
           ` : answerEntries.map(([qId, val]) => `
             <div class="answer-row">
               <span class="answer-q">${escapeHtml(qId)}:</span>
@@ -376,8 +385,8 @@ function renderTelemetryCards(responses) {
         </div>
 
         ${r.telemetry_events && r.telemetry_events.length > 0 ? `
-          <div style="margin-top: 8px; font-size: 11px; color: var(--gray);">
-            ⚡ Последнее событие: <code>${escapeHtml(r.telemetry_events[0].field_id || r.telemetry_events[0].event_type)}</code> (${new Date(r.telemetry_events[0].server_time).toLocaleTimeString()})
+          <div style="margin-top: 8px; font-size: 11px; color: var(--color-muted);">
+            Событие: <code>${escapeHtml(r.telemetry_events[0].field_id || r.telemetry_events[0].event_type)}</code> (${new Date(r.telemetry_events[0].server_time).toLocaleTimeString()})
           </div>
         ` : ''}
       </div>

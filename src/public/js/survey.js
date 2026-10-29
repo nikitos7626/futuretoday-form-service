@@ -1,4 +1,4 @@
-// Participant Survey Logic
+// Participant Survey Logic (Vantage Theme)
 (async function() {
   const pathParts = window.location.pathname.split('/').filter(Boolean);
   const slug = pathParts[pathParts.length - 1];
@@ -94,9 +94,9 @@
     questionsFormList.innerHTML = '';
 
     questions.forEach((q, index) => {
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.id = `card_${q.id}`;
+      const panel = document.createElement('div');
+      panel.className = 'panel ticks';
+      panel.id = `card_${q.id}`;
 
       let inputHtml = '';
       const existingVal = currentAnswers[q.id];
@@ -106,7 +106,7 @@
           inputHtml = `
             <textarea 
               name="${q.id}" 
-              placeholder="Введите ваш ответ..."
+              placeholder="Введите ваш ответ…"
               oninput="handleFieldChange('${q.id}', this.value)"
             >${escapeHtml(existingVal || '')}</textarea>
           `;
@@ -143,7 +143,7 @@
 
         case 'single':
           const options = q.options || [];
-          inputHtml = `<div class="choice-list">` + options.map((opt, i) => `
+          inputHtml = `<div class="choice-list">` + options.map((opt) => `
             <label class="choice-item">
               <input 
                 type="radio" 
@@ -160,7 +160,7 @@
         case 'multiple':
           const multiOptions = q.options || [];
           const selectedList = Array.isArray(existingVal) ? existingVal : [];
-          inputHtml = `<div class="choice-list">` + multiOptions.map((opt, i) => `
+          inputHtml = `<div class="choice-list">` + multiOptions.map((opt) => `
             <label class="choice-item">
               <input 
                 type="checkbox" 
@@ -181,14 +181,14 @@
               type="text" 
               name="${q.id}" 
               value="${escapeHtml(existingVal || '')}"
-              placeholder="Ваш ответ..."
+              placeholder="Ваш ответ…"
               oninput="handleFieldChange('${q.id}', this.value)"
             >
           `;
           break;
       }
 
-      card.innerHTML = `
+      panel.innerHTML = `
         <div class="form-group" style="margin-bottom: 0;">
           <label>
             ${index + 1}. ${escapeHtml(q.label)}
@@ -198,7 +198,7 @@
         </div>
       `;
 
-      questionsFormList.appendChild(card);
+      questionsFormList.appendChild(panel);
     });
   }
 
@@ -296,14 +296,18 @@
 
   function updateProgressUI() {
     const pct = getCalculatedProgress();
-    progressBar.style.width = `${pct}%`;
-    progressText.textContent = `${pct}%`;
+    if (progressBar) {
+      progressBar.style.transform = `scaleX(${pct / 100})`;
+    }
+    if (progressText) {
+      progressText.innerHTML = `${pct}<span class="u">%</span>`;
+    }
   }
 
   function setSavingStatus(isSaving) {
     if (isSaving) {
       saveStatus.className = 'telemetry-status telemetry-saving';
-      saveStatusText.textContent = 'Сохранение...';
+      saveStatusText.textContent = 'Сохранение…';
     } else {
       saveStatus.className = 'telemetry-status telemetry-live';
       const timeStr = new Date().toLocaleTimeString();
@@ -324,8 +328,8 @@
           const card = document.getElementById(`card_${q.id}`);
           if (card) {
             card.scrollIntoView({ behavior: 'smooth' });
-            card.style.borderColor = 'var(--danger)';
-            setTimeout(() => { card.style.borderColor = 'var(--gray-border)'; }, 2000);
+            card.style.borderColor = 'var(--color-danger)';
+            setTimeout(() => { card.style.borderColor = 'var(--color-rule)'; }, 2000);
           }
           alert(`Пожалуйста, ответьте на обязательный вопрос: "${q.label}"`);
           return;
@@ -334,7 +338,7 @@
     }
 
     btnSubmit.disabled = true;
-    btnSubmit.textContent = 'Отправка...';
+    btnSubmit.textContent = 'Отправка…';
 
     try {
       const res = await fetch(`/api/surveys/${slug}/submit`, {
@@ -355,7 +359,7 @@
     } catch (err) {
       alert(`Ошибка: ${err.message}`);
       btnSubmit.disabled = false;
-      btnSubmit.textContent = 'Отправить отклик ✓';
+      btnSubmit.textContent = 'Отправить отклик';
     }
   });
 

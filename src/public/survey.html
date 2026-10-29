@@ -3,22 +3,38 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Форма отклика участника с мгновенным автосохранением и телеметрией.">
   <title>Опрос</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geologica:wght,CRSV,SHRP@200..500,0,0..100&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <div class="container" style="max-width: 720px;">
+  <div class="container" style="max-width: 740px;">
     <!-- Loading state -->
-    <div id="loadingState" class="card" style="text-align: center; padding: 48px;">
-      <div style="font-size: 24px; margin-bottom: 8px;">⏳</div>
-      <div>Загрузка опроса...</div>
+    <div id="loadingState" class="panel ticks" style="text-align: center; padding: 48px;">
+      <div style="margin-bottom: 12px; color: var(--color-accent);" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+          <circle cx="12" cy="12" r="9"/>
+          <polyline points="12 7 12 12 15 15"/>
+        </svg>
+      </div>
+      <div>Загрузка опроса…</div>
     </div>
 
     <!-- Error state -->
-    <div id="errorState" class="card" style="display: none; text-align: center; padding: 48px;">
-      <div style="font-size: 32px; margin-bottom: 12px; color: var(--danger);">⚠️</div>
+    <div id="errorState" class="panel ticks" style="display: none; text-align: center; padding: 48px;">
+      <div style="margin-bottom: 16px; color: var(--color-danger);" aria-hidden="true">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
       <h2 style="margin-bottom: 8px;" id="errorMessage">Опрос не найден</h2>
-      <p style="color: var(--gray); margin-bottom: 20px;">Возможно, ссылка устарела или опрос был удален.</p>
+      <p style="color: var(--color-muted); margin-bottom: 24px;">Возможно, ссылка устарела или опрос был удален.</p>
       <a href="/admin" class="btn btn-secondary">В панель управления</a>
     </div>
 
@@ -28,7 +44,7 @@
       <header>
         <div>
           <h1 id="surveyTitle">Название опроса</h1>
-          <p id="surveyDesc" class="subtitle" style="margin-top: 4px;"></p>
+          <p id="surveyDesc" class="subtitle"></p>
         </div>
         <div id="saveStatus" class="telemetry-status telemetry-live">
           <span class="pulse-dot"></span>
@@ -37,20 +53,20 @@
       </header>
 
       <!-- Progress bar -->
-      <div class="card" style="padding: 16px 20px; margin-bottom: 16px;">
-        <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 500; margin-bottom: 6px;">
+      <div class="panel" style="padding: 16px 20px; margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 400; margin-bottom: 8px;">
           <span>Прогресс заполнения</span>
-          <span id="progressText">0%</span>
+          <span id="progressText" class="num">0<span class="u">%</span></span>
         </div>
         <div class="progress-bar-container" style="margin-bottom: 0;">
-          <div id="progressBar" class="progress-bar" style="width: 0%;"></div>
+          <div id="progressBar" class="progress-bar"></div>
         </div>
       </div>
 
       <!-- Survey Card Form -->
       <form id="responseForm">
         <!-- Respondent name -->
-        <div class="card">
+        <div class="panel ticks">
           <div class="form-group" style="margin-bottom: 0;">
             <label for="participantName">Ваше имя или контакт (необязательно)</label>
             <input type="text" id="participantName" placeholder="Например: Иван Иванов или @telegram">
@@ -64,25 +80,34 @@
         </div>
 
         <!-- Submit Button -->
-        <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-          <div style="font-size: 13px; color: var(--gray);">
-            💾 Каждый ответ автоматически сохраняется в реальном времени
+        <div class="panel ticks" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+          <div style="font-size: 13px; color: var(--color-muted); display: flex; align-items: center; gap: 8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+            Каждый ответ сохраняется автоматически в реальном времени
           </div>
           <button type="submit" class="btn btn-primary" id="btnSubmit">
-            Отправить отклик ✓
+            Отправить отклик
           </button>
         </div>
       </form>
     </div>
 
     <!-- Completed Screen -->
-    <div id="completedScreen" class="card success-screen" style="display: none;">
-      <div class="success-icon">🎉</div>
-      <h2 style="margin-bottom: 12px; color: #065f46;">Спасибо за ваш отклик!</h2>
-      <p style="color: var(--gray); margin-bottom: 24px;">Ваши ответы успешно отправлены и сохранены в базе данных.</p>
-      <div style="background: var(--success-light); border: 1px solid #a7f3d0; border-radius: 8px; padding: 16px; margin-bottom: 24px; font-size: 14px; text-align: left;">
+    <div id="completedScreen" class="panel ticks success-screen" style="display: none;">
+      <div class="success-icon" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </div>
+      <h2 style="margin-bottom: 12px; color: var(--color-ink);">Спасибо за ваш отклик</h2>
+      <p style="color: var(--color-muted); margin-bottom: 24px;">Ваши ответы успешно отправлены и сохранены в базе данных.</p>
+      <div class="panel" style="margin-bottom: 24px; font-size: 14px; text-align: left;">
         <div><strong>Идентификатор отклика:</strong> <code id="summarySessionId"></code></div>
-        <div style="margin-top: 4px;"><strong>Время отправки:</strong> <span id="summarySubmitTime"></span></div>
+        <div style="margin-top: 8px;"><strong>Время отправки:</strong> <span id="summarySubmitTime" class="num"></span></div>
       </div>
       <a href="/admin" class="btn btn-secondary">В панель управления</a>
     </div>
