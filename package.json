@@ -1,0 +1,15 @@
+{
+  "name": "survey-feedback-service",
+  "version": "1.0.0",
+  "description": "Сервис создания форм откликов с кастомными ссылками и телеметрией в реальном времени",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}

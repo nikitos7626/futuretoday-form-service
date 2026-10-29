@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Опрос</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container" style="max-width: 720px;">
+    <!-- Loading state -->
+    <div id="loadingState" class="card" style="text-align: center; padding: 48px;">
+      <div style="font-size: 24px; margin-bottom: 8px;">⏳</div>
+      <div>Загрузка опроса...</div>
+    </div>
+
+    <!-- Error state -->
+    <div id="errorState" class="card" style="display: none; text-align: center; padding: 48px;">
+      <div style="font-size: 32px; margin-bottom: 12px; color: var(--danger);">⚠️</div>
+      <h2 style="margin-bottom: 8px;" id="errorMessage">Опрос не найден</h2>
+      <p style="color: var(--gray); margin-bottom: 20px;">Возможно, ссылка устарела или опрос был удален.</p>
+      <a href="/admin" class="btn btn-secondary">В панель управления</a>
+    </div>
+
+    <!-- Survey Form View -->
+    <div id="surveyContent" style="display: none;">
+      <!-- Header with Live Save Indicator -->
+      <header>
+        <div>
+          <h1 id="surveyTitle">Название опроса</h1>
+          <p id="surveyDesc" class="subtitle" style="margin-top: 4px;"></p>
+        </div>
+        <div id="saveStatus" class="telemetry-status telemetry-live">
+          <span class="pulse-dot"></span>
+          <span id="saveStatusText">Связь установлена</span>
+        </div>
+      </header>
+
+      <!-- Progress bar -->
+      <div class="card" style="padding: 16px 20px; margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 500; margin-bottom: 6px;">
+          <span>Прогресс заполнения</span>
+          <span id="progressText">0%</span>
+        </div>
+        <div class="progress-bar-container" style="margin-bottom: 0;">
+          <div id="progressBar" class="progress-bar" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- Survey Card Form -->
+      <form id="responseForm">
+        <!-- Respondent name -->
+        <div class="card">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="participantName">Ваше имя или контакт (необязательно)</label>
+            <input type="text" id="participantName" placeholder="Например: Иван Иванов или @telegram">
+            <div class="hint">Поможет организатору связаться с вами при необходимости.</div>
+          </div>
+        </div>
+
+        <!-- Questions container -->
+        <div id="questionsFormList">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Submit Button -->
+        <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-size: 13px; color: var(--gray);">
+            💾 Каждый ответ автоматически сохраняется в реальном времени
+          </div>
+          <button type="submit" class="btn btn-primary" id="btnSubmit">
+            Отправить отклик ✓
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Completed Screen -->
+    <div id="completedScreen" class="card success-screen" style="display: none;">
+      <div class="success-icon">🎉</div>
+      <h2 style="margin-bottom: 12px; color: #065f46;">Спасибо за ваш отклик!</h2>
+      <p style="color: var(--gray); margin-bottom: 24px;">Ваши ответы успешно отправлены и сохранены в базе данных.</p>
+      <div style="background: var(--success-light); border: 1px solid #a7f3d0; border-radius: 8px; padding: 16px; margin-bottom: 24px; font-size: 14px; text-align: left;">
+        <div><strong>Идентификатор отклика:</strong> <code id="summarySessionId"></code></div>
+        <div style="margin-top: 4px;"><strong>Время отправки:</strong> <span id="summarySubmitTime"></span></div>
+      </div>
+      <a href="/admin" class="btn btn-secondary">В панель управления</a>
+    </div>
+  </div>
+
+  <script src="/js/survey.js"></script>
+</body>
+</html>
